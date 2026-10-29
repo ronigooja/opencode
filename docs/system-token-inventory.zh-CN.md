@@ -35,7 +35,7 @@
 
 | 固定块 | 字符数 | 估算 token |
 |---|---:|---:|
-| 身份与开头说明（`system.txt` 中第 1 段） | 133 | 34 |
+| 身份与开头说明（`system.txt` 中第 1 段） | 139 | 35 |
 | Harness | 242 | 61 |
 | Communication | 141 | 36 |
 | Working in codebases | 234 | 59 |
