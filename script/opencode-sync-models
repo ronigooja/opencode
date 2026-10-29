@@ -64,6 +64,7 @@ models=$(jq -c '
   | map(select(type == "string"))
   | map(select(test("^(gpt-image|codex-auto-review)") | not))
   | unique
+  | reverse
   | map({key: ., value: {name: pretty_name}})
   | from_entries
 ' "$response")
