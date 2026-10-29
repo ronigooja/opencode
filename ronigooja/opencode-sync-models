@@ -13,7 +13,7 @@ Required environment variables:
 Optional environment variables:
   OPENCODE_CONFIG              OpenCode config path
   OPENCODE_PROVIDER_ID         Provider ID (default: cliproxyapi)
-  OPENCODE_PROVIDER_NAME       Provider display name (default: CLIProxyAPI)
+  OPENCODE_PROVIDER_NAME       Provider display name (default: zoeapi)
   OPENCODE_BASE_URL            Provider API base URL (default: catalog URL without /models)
   OPENCODE_DEFAULT_MODEL       Model to ensure remains present
   OPENCODE_OFFICIAL_CATALOG_URL
@@ -42,7 +42,7 @@ if [[ -z "$api_key" ]]; then
 fi
 config=${OPENCODE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json}
 provider_id=${OPENCODE_PROVIDER_ID:-cliproxyapi}
-provider_name=${OPENCODE_PROVIDER_NAME:-CLIProxyAPI}
+provider_name=${OPENCODE_PROVIDER_NAME:-zoeapi}
 base_url=${OPENCODE_BASE_URL:-${base_url_from_codex:-${catalog_url%/models}}}
 default_model=${OPENCODE_DEFAULT_MODEL:-${default_model_from_codex:-}}
 official_catalog_url=${OPENCODE_OFFICIAL_CATALOG_URL:-https://models.opencode.ai/catalog.json}
