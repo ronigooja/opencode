@@ -15,9 +15,7 @@ export default Runtime.handler(
       headers: Service.headers(server.endpoint),
     })
     const response = yield* Effect.promise(() => client.model.list({ location: { directory: process.cwd() } }))
-    const models = response.data
-      .map((model) => `${model.providerID}/${model.id}`)
-      .toSorted((a, b) => a.localeCompare(b))
+    const models = response.data.map((model) => `${model.providerID}/${model.id}`)
     if (models.length > 0) process.stdout.write(models.join(EOL) + EOL)
   }),
 )
