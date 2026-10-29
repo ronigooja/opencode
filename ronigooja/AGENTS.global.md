@@ -53,4 +53,4 @@
 
 ## Action transparency
 
-执行任务前，让用户知情你准备怎么做
+Before starting a task, make sure the user knows what you plan to do.
