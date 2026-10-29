@@ -12,7 +12,7 @@ This directory contains the files contributed by `ronigooja` that are specific
   model context/output limits when the catalog provides them.
 - `system-token-inventory.zh-CN.md` — Chinese notes about the system prompt and
   built-in tool token inventory.
-- `AGENTS.global.md` — the original contribution rules added by `ronigooja`.
+- `AGENTS.global.md` — a copy of the rules file included in the `ronigooja` commit; it is not the active project `AGENTS.md`.
 
 The local launchd job uses the installed copy at
 `/Users/zhuwei/environment/bin/opencode-sync-models`. The repository script is
