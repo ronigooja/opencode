@@ -2,6 +2,7 @@
 - Keep runtime dependencies directed from Schema to Core and Protocol, then from Core and Protocol to Server. Client runtime code may depend on Schema and Protocol but never Core or Server; `sdk` composes Client, Core, and Server.
 - This repository does not use Changesets. Do not add `.changeset` files; follow the existing release workflow instead.
 - The default branch is `dev`. Base branches and worktrees on `origin/dev`, target PRs at `dev`, and diff against `origin/dev` unless told otherwise.
+- When a change comes from `ronigooja`, keep its contributed files under `ronigooja/`. If the change must touch another repository file, record that file's path, reason, and resulting behavior in `ronigooja/`.
 
 ## Live TUI Testing
 
