@@ -29,6 +29,25 @@
 | write 工具指导 | 新建或整文件替换用 `write`；局部修改优先 `edit` | 工具快照包含 `write` | 关闭/隐藏 write 后不生成 |
 | edit 工具指导 | 解释 `oldString/newString` 精确替换、唯一匹配和 `replaceAll` | 工具快照包含 `edit` | 关闭/隐藏 edit 后不生成 |
 
+### 默认提示词 token 估算
+
+以下数值按源码文本字符数 ÷ 4 向上取整估算（英文 Markdown、接近 GPT 常见 tokenizer 的量级），实际值会随模型 tokenizer 略有差异。`${OPENCODE_TOOL_GUIDANCE}` 占位符本身不计入；下面的工具指导按实际渲染后的文本统计。
+
+| 固定块 | 字符数 | 估算 token |
+|---|---:|---:|
+| 身份与开头说明（`system.txt` 中第 1 段） | 133 | 34 |
+| Harness | 242 | 61 |
+| Communication | 141 | 36 |
+| Working in codebases | 234 | 59 |
+| 默认提示词合计（不含工具指导） | 756 | 189 |
+| shell 工具指导 | 279 | 70 |
+| write 工具指导 | 122 | 31 |
+| edit 工具指导 | 338 | 85 |
+| 三种工具指导全部启用 | 739 | 185 |
+| 默认提示词 + 三种工具指导 | 1,495 | 374 |
+
+工具指导按工具快照动态增减：只有 `shell`、`write`、`edit` 分别存在时才计入对应行。
+
 ### 默认提示词的替换规则
 
 - `agent.system` 是最直接的总开关：设置后默认身份、Harness、Communication、代码库规则和按工具生成的指导都不再注入（`model-request.ts:106-112`）。
@@ -57,6 +76,22 @@
 - `core/environment`：注入 `<env>`，包含工作目录、项目根、是否 Git 仓库、平台、临时目录建议。
 - 发现的指令文件以 `Instructions from: <path>` 形式注入，并记录路径避免同一会话重复注入（`session/instructions.ts`）。
 
+### 动态块 token 估算
+
+动态块没有固定 token 数，下面是常见项目的估算范围：
+
+| 动态块 | 典型估算 | 计算依据 |
+|---|---:|---|
+| `core/date` | 6–8 | `Today's date: YYYY-MM-DD` |
+| `core/environment` | 45–75 | 工作目录、项目根、Git 状态、平台和临时目录绝对路径长度 |
+| `# Your Model` 身份块 | 20–45 | 模型名、Provider ID、Model ID 长度 |
+| Code Mode catalog | 20–200+ | 工具和命名空间数量、描述长度 |
+| Skills | 每个 15–60 | skill ID、名称、描述；只列出允许且可自动调用的 skill |
+| References | 每个 15–50 | reference 路径与描述 |
+| MCP instructions | 20–数百 | 可见 MCP server、工具和说明数量 |
+| discovery / `AGENTS.md` | 文件字符数 ÷ 4 | 原文件内容几乎原样注入，路径和标题另有少量开销 |
+| session entries | 具体文本字符数 ÷ 4 | 由插件或会话动态写入 |
+
 ## 4. 按模型启用的系统提示词模板
 
 注册位置：`packages/core/src/plugin/optimize.ts:16-76`；模板目录：`packages/core/src/plugin/system-prompt/`。
@@ -68,6 +103,19 @@
 | 模型 id 含 `kimi` | `kimi.txt` | override | 同上 |
 | 模型 id 含 `trinity` | `trinity.txt` | override | 同上 |
 | 模型 id 含 `muse` | `meta.txt`，替换 `{{MODEL_NAME}}` | override | 同上 |
+
+模板文件的字符数与 token 估算如下（同样按字符数 ÷ 4）：
+
+| 模板 | 字符数 | 估算 token |
+|---|---:|---:|
+| `anthropic.txt` | 300 | 75 |
+| `gpt.txt` | 2,572 | 643 |
+| `gpt-astra.txt` | 3,823 | 956 |
+| `kimi.txt` | 8,689 | 2,173 |
+| `meta.txt` | 7,853 | 1,964 |
+| `trinity.txt` | 7,684 | 1,921 |
+
+这些是模板正文的估算值，不包含基础提示词、动态工具指导、模型身份块和 `initial` 指令。Anthropic 模板采用 append，其余模板采用 override；因此 override 模式下模板会替换默认系统消息首段，而不是与默认正文相加。
 
 模板只在 `context`、`compaction`、`generate` 请求触发；匹配不到模型时不做处理。源码注释明确 `OpenAIToolsPlugin` 和 `AnthropicToolsPlugin` 当前未加入 `Plugins`，因此不会自动删除 grep/glob 工具。
 
