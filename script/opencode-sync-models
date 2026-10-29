@@ -60,12 +60,14 @@ models=$(jq -c '
     else .
     end;
   (.data // .models // [])
-  | map(.id)
-  | map(select(type == "string"))
-  | map(select(test("^(gpt-image|codex-auto-review)") | not))
-  | unique
-  | reverse
-  | map({key: ., value: {name: pretty_name}})
+  | map(select(.id | type == "string"))
+  | map(select(.id | test("^(gpt-image|codex-auto-review)") | not))
+  | unique_by(.id)
+  | map({
+      key: .id,
+      value: ({name: (.id | pretty_name)}
+        + (if (.created | type) == "number" then {releaseDate: (.created | todateiso8601[0:10])} else {} end))
+    })
   | from_entries
 ' "$response")
 
