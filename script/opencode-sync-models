@@ -20,13 +20,29 @@ USAGE
   exit 0
 fi
 
-catalog_url=${OPENCODE_MODEL_CATALOG_URL:?OPENCODE_MODEL_CATALOG_URL is required}
-api_key=${OPENCODE_API_KEY:?OPENCODE_API_KEY is required}
+codex_config=${OPENCODE_CODEX_CONFIG:-$HOME/.codex/config.toml}
+if [[ -f "$codex_config" ]]; then
+  catalog_url_from_codex=$(awk -F'"' '/model_catalog_url[[:space:]]*=/{print $2; exit}' "$codex_config")
+  api_key_from_codex=$(awk -F'"' '/experimental_bearer_token[[:space:]]*=/{print $2; exit}' "$codex_config")
+  default_model_from_codex=$(awk -F'"' '/^model[[:space:]]*=/{print $2; exit}' "$codex_config")
+  base_url_from_codex=$(awk -F'"' '/^base_url[[:space:]]*=/{print $2; exit}' "$codex_config")
+fi
+
+catalog_url=${OPENCODE_MODEL_CATALOG_URL:-${catalog_url_from_codex:-}}
+api_key=${OPENCODE_API_KEY:-${api_key_from_codex:-}}
+if [[ -z "$catalog_url" ]]; then
+  print -u2 "OPENCODE_MODEL_CATALOG_URL or model_catalog_url in $codex_config is required"
+  exit 1
+fi
+if [[ -z "$api_key" ]]; then
+  print -u2 "OPENCODE_API_KEY or experimental_bearer_token in $codex_config is required"
+  exit 1
+fi
 config=${OPENCODE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json}
 provider_id=${OPENCODE_PROVIDER_ID:-cliproxyapi}
 provider_name=${OPENCODE_PROVIDER_NAME:-CLIProxyAPI}
-base_url=${OPENCODE_BASE_URL:-${catalog_url%/models}}
-default_model=${OPENCODE_DEFAULT_MODEL:-}
+base_url=${OPENCODE_BASE_URL:-${base_url_from_codex:-${catalog_url%/models}}}
+default_model=${OPENCODE_DEFAULT_MODEL:-${default_model_from_codex:-}}
 
 if [[ ! -f "$config" ]]; then
   print -u2 "OpenCode config not found: $config"
