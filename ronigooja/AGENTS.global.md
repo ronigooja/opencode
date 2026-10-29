@@ -14,7 +14,6 @@
 ## Sub-agents
 
 - When a task has independent, clearly scoped parts that can be handled in parallel, delegate those parts to sub-agents when doing so will save time or improve the result. When work is small, sequential, or requires tightly coupled decisions, handle it directly.
-- When delegating, use the fewest sub-agents needed for the independent parts, within the available concurrency limit. Give each sub-agent a distinct scope and avoid overlapping edits.
 - When choosing a model for a sub-agent, match its strengths to the task: favor fast, efficient models for straightforward work; stronger reasoning models for complex analysis or difficult decisions; and models with strong visual capabilities for visual tasks. Use the lowest reasoning effort appropriate to the task, increasing it for ambiguity, complexity, or high-impact decisions.
 - When starting a sub-agent, tell the user which model and reasoning effort it uses.
 - When a sub-agent needs to modify a repository independently, give it a separate worktree. When it needs a workspace, place it under `/tmp`.
