@@ -16,6 +16,7 @@
 - When a task has independent, clearly scoped parts that can be handled in parallel, delegate those parts to sub-agents when doing so will save time or improve the result. When work is small, sequential, or requires tightly coupled decisions, handle it directly.
 - When choosing a model for a sub-agent, match its strengths to the task: favor fast, efficient models for straightforward work; stronger reasoning models for complex analysis or difficult decisions; and models with strong visual capabilities for visual tasks. Use the lowest reasoning effort appropriate to the task, increasing it for ambiguity, complexity, or high-impact decisions.
 - When starting a sub-agent, tell the user which model and reasoning effort it uses.
+- When invoking a sub-agent, choose foreground or background execution based on the task: use foreground execution when the result is needed before continuing or when the task is tightly coupled to the current work; use background execution when the task is independent, can run in parallel, or does not block the next step. Make this choice autonomously per invocation, and report the choice when it materially affects the workflow.
 - When a sub-agent needs to modify a repository independently, give it a separate worktree. When it needs a workspace, place it under `/tmp`.
 - When a sub-agent has completed its task and its context has become too long for a subsequent task, start a new sub-agent with the relevant context instead of reusing it.
 
