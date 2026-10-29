@@ -1,0 +1,94 @@
+#!/bin/zsh
+set -euo pipefail
+
+if (( $# > 0 )) && [[ "$1" == "-h" || "$1" == "--help" ]]; then
+  cat <<'USAGE'
+Sync models from an OpenAI-compatible /models endpoint into opencode.json.
+
+Required environment variables:
+  OPENCODE_MODEL_CATALOG_URL  Model catalog URL, for example https://example.com/v1/models
+  OPENCODE_API_KEY            Bearer token for the catalog endpoint
+
+Optional environment variables:
+  OPENCODE_CONFIG              OpenCode config path
+  OPENCODE_PROVIDER_ID         Provider ID (default: cliproxyapi)
+  OPENCODE_PROVIDER_NAME       Provider display name (default: CLIProxyAPI)
+  OPENCODE_BASE_URL            Provider API base URL (default: catalog URL without /models)
+  OPENCODE_DEFAULT_MODEL       Model to ensure remains present
+USAGE
+  exit 0
+fi
+
+catalog_url=${OPENCODE_MODEL_CATALOG_URL:?OPENCODE_MODEL_CATALOG_URL is required}
+api_key=${OPENCODE_API_KEY:?OPENCODE_API_KEY is required}
+config=${OPENCODE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json}
+provider_id=${OPENCODE_PROVIDER_ID:-cliproxyapi}
+provider_name=${OPENCODE_PROVIDER_NAME:-CLIProxyAPI}
+base_url=${OPENCODE_BASE_URL:-${catalog_url%/models}}
+default_model=${OPENCODE_DEFAULT_MODEL:-}
+
+if [[ ! -f "$config" ]]; then
+  print -u2 "OpenCode config not found: $config"
+  exit 1
+fi
+
+response=$(mktemp /tmp/opencode-models.XXXXXX)
+updated=$(mktemp /tmp/opencode-config.XXXXXX)
+
+curl -fsS --connect-timeout 10 --max-time 30 \
+  -H "Authorization: Bearer $api_key" \
+  "$catalog_url" > "$response"
+
+models=$(jq -c '
+  def title_words: split(" ") | map((.[0:1] | ascii_upcase) + .[1:]) | join(" ");
+  def pretty_name:
+    if test("^gpt-") then
+      (sub("^gpt-"; "") | gsub("-"; " ") | title_words | "GPT-" + .)
+    elif test("^claude-[0-9]+-[0-9]+-") then
+      (capture("^claude-(?<major>[0-9]+)-(?<minor>[0-9]+)-(?<family>[a-z]+)(?:-(?<date>[0-9]{8}))?$")
+       | "Claude \(.major).\(.minor) \(.family | title_words)"
+       + (if .date then " (\(.date[0:4])-\(.date[4:6])-\(.date[6:8]))" else "" end))
+    elif test("^claude-[a-z]+-[0-9]+-[0-9]{8}$") then
+      (capture("^claude-(?<family>[a-z]+)-(?<major>[0-9]+)-(?<date>[0-9]{8})$")
+       | "Claude \(.family | title_words) \(.major)"
+       + " (\(.date[0:4])-\(.date[4:6])-\(.date[6:8]))")
+    elif test("^claude-[a-z]+-") then
+      (capture("^claude-(?<family>[a-z]+)-(?<major>[0-9]+)(?:-(?<minor>[0-9]+))?(?:-(?<date>[0-9]{8}))?$")
+       | "Claude \(.family | title_words) \(.major)"
+       + (if .minor then ".\(.minor)" else "" end)
+       + (if .date then " (\(.date[0:4])-\(.date[4:6])-\(.date[6:8]))" else "" end))
+    else .
+    end;
+  (.data // .models // [])
+  | map(.id)
+  | map(select(type == "string"))
+  | map(select(test("^(gpt-image|codex-auto-review)") | not))
+  | unique
+  | map({key: ., value: {name: pretty_name}})
+  | from_entries
+' "$response")
+
+if [[ "$models" == "{}" ]]; then
+  print -u2 "No chat models returned by $catalog_url"
+  exit 1
+fi
+
+jq \
+  --arg provider_id "$provider_id" \
+  --arg provider_name "$provider_name" \
+  --arg base_url "$base_url" \
+  --arg api_key "$api_key" \
+  --arg default_model "$default_model" \
+  --argjson models "$models" \
+  '.provider[$provider_id].npm = "@ai-sdk/openai-compatible"
+   | .provider[$provider_id].name = $provider_name
+   | .provider[$provider_id].options.baseURL = $base_url
+   | .provider[$provider_id].options.apiKey = $api_key
+   | .provider[$provider_id].models = $models
+   | if $default_model != "" then .provider[$provider_id].models[$default_model] //= {name: $default_model} else . end
+  ' "$config" > "$updated"
+
+chmod 600 "$updated"
+mv "$updated" "$config"
+chmod 600 "$config"
+print "Synced $(jq 'length' <<< "$models") models to $config"
