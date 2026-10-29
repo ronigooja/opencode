@@ -68,8 +68,6 @@ models=$(jq -c '
       value: ({name: (.id | pretty_name)}
         + (if (.created | type) == "number" then {releaseDate: (.created | todateiso8601[0:10])} else {} end))
     })
-  | sort_by(.value.releaseDate // "")
-  | reverse
   | from_entries
 ' "$response")
 
