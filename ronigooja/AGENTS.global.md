@@ -53,7 +53,4 @@
 
 ## Action transparency
 
-- When a task involves more than three tool calls or any file modification, state the goal, the intended approach, and the key assumption before the first call.
-- When you choose between approaches, change the plan, or a result alters your next step, state the evidence behind it and the option you set aside. Skip this when a result only confirms the existing plan.
-- When about to modify files, run a build or test, or take a hard-to-reverse action, state why the step is needed and what outcome you expect.
-- When 60 seconds of ongoing work pass without a user-visible message, send a brief update on what you learned, what is uncertain, and the next step.
+执行任务前，让用户知情你准备怎么做
