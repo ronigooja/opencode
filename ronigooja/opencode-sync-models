@@ -172,6 +172,9 @@ jq \
              | from_entries)
          })
    | if $default_model != "" then
+       .model = ($provider_id + "/" + $default_model)
+     else . end
+   | if $default_model != "" then
        .providers[$provider_id].models[$default_model] //= {name: $default_model}
      else . end
    | del(.provider[$provider_id])
