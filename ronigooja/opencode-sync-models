@@ -16,6 +16,8 @@ Optional environment variables:
   OPENCODE_PROVIDER_NAME       Provider display name (default: CLIProxyAPI)
   OPENCODE_BASE_URL            Provider API base URL (default: catalog URL without /models)
   OPENCODE_DEFAULT_MODEL       Model to ensure remains present
+  OPENCODE_OFFICIAL_CATALOG_URL
+                              Official fallback catalog (default: https://models.opencode.ai/catalog.json)
 USAGE
   exit 0
 fi
@@ -43,6 +45,7 @@ provider_id=${OPENCODE_PROVIDER_ID:-cliproxyapi}
 provider_name=${OPENCODE_PROVIDER_NAME:-CLIProxyAPI}
 base_url=${OPENCODE_BASE_URL:-${base_url_from_codex:-${catalog_url%/models}}}
 default_model=${OPENCODE_DEFAULT_MODEL:-${default_model_from_codex:-}}
+official_catalog_url=${OPENCODE_OFFICIAL_CATALOG_URL:-https://models.opencode.ai/catalog.json}
 
 if [[ ! -f "$config" ]]; then
   print -u2 "OpenCode config not found: $config"
@@ -50,14 +53,24 @@ if [[ ! -f "$config" ]]; then
 fi
 
 response=$(mktemp /tmp/opencode-models.XXXXXX)
+official_catalog=$(mktemp /tmp/opencode-official-models.XXXXXX)
 updated=$(mktemp /tmp/opencode-config.XXXXXX)
-trap 'rm -f "$response" "$updated"' EXIT
+trap 'rm -f "$response" "$official_catalog" "$updated"' EXIT
 
 curl -fsS --connect-timeout 10 --max-time 30 \
   -H "Authorization: Bearer $api_key" \
   "$catalog_url" > "$response"
 
-models=$(jq -c '
+# The gateway catalog is authoritative for fields it exposes, but many
+# OpenAI-compatible /models endpoints omit model limits entirely. OpenCode's
+# official catalog is the fallback source for those missing fields.
+if ! curl -fsS --connect-timeout 10 --max-time 60 \
+  "$official_catalog_url" > "$official_catalog"; then
+  print -u2 "Warning: official model catalog unavailable; syncing gateway metadata only"
+  print '{}' > "$official_catalog"
+fi
+
+models=$(jq -c --slurpfile official_catalog "$official_catalog" '
   def title_words: split(" ") | map((.[0:1] | ascii_upcase) + .[1:]) | join(" ");
   def pretty_name:
     if test("^gpt-") then
@@ -75,23 +88,49 @@ models=$(jq -c '
        | "Claude \(.family | title_words) \(.major)"
        + (if .minor then ".\(.minor)" else "" end)
        + (if .date then " (\(.date[0:4])-\(.date[4:6])-\(.date[6:8]))" else "" end))
-    else .
-    end;
-  (.data // .models // [])
-  | map(select(.id | type == "string"))
-  | map(select(.id | test("^(gpt-image|codex-auto-review)") | not))
-  | unique_by(.id)
-  | map(. as $model | {
-      key: .id,
-      value: ({name: (.id | pretty_name)}
-        + (if (.created | type) == "number" then {releaseDate: (.created | todateiso8601[0:10])} else {} end)
-        + ({
-            context: (["context_length", "context_window", "max_context_length", "context"]
-              | map(. as $key | $model[$key] | if type == "number" and isfinite and . > 0 then floor else null end)
-              | map(select(. != null)) | first),
-            output: (["max_output_length", "max_tokens", "output_token_limit", "output"]
-              | map(. as $key | $model[$key] | if type == "number" and isfinite and . > 0 then floor else null end)
-              | map(select(. != null)) | first)
+     else .
+     end;
+   def positive_number:
+     if type == "number" and isfinite and . > 0 then floor else null end;
+   def first_positive($values):
+     $values | map(positive_number) | map(select(. != null)) | first;
+   def official_limits:
+     ([($official_catalog[0].providers // {})[].models // {} | to_entries[]
+       | {key: .key, value: (.value.limit // {})}] | from_entries)
+     * ($official_catalog[0].models // {} | with_entries(.value |= (.limit // {})));
+   (.data // .models // []) as $source
+   | (official_limits) as $official_limits
+   | $source
+   | map(select(.id | type == "string"))
+   | map(select(.id | test("^(gpt-image|codex-auto-review)") | not))
+   | unique_by(.id)
+   | map(. as $model | {
+       key: .id,
+       value: ({name: (.id | pretty_name)}
+         + (if (.created | type) == "number" then {releaseDate: (.created | todateiso8601[0:10])} else {} end)
+         + ({
+            context: first_positive([
+              $model.context_length,
+              $model.context_window,
+              $model.max_context_length,
+              $model.context,
+              $official_limits[$model.id].context
+            ]),
+            input: first_positive([
+              $model.input_length,
+              $model.max_input_length,
+              $model.max_prompt_tokens,
+              $model.input_token_limit,
+              $model.input,
+              $official_limits[$model.id].input
+            ]),
+            output: first_positive([
+              $model.max_output_length,
+              $model.max_tokens,
+              $model.output_token_limit,
+              $model.output,
+              $official_limits[$model.id].output
+            ])
           } | with_entries(select(.value != null))
           | if length == 0 then {} else {limit: .} end))
     })

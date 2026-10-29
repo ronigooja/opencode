@@ -9,7 +9,10 @@ This directory contains the files contributed by `ronigooja` that are specific
 - `opencode-sync-models` — synchronizes the OpenAI-compatible model catalog into
   the local OpenCode configuration. It writes the current `providers` format,
   preserves the API key in `settings.apiKey`, records `releaseDate`, and maps
-  model context/output limits when the catalog provides them.
+  model context/input/output limits when the gateway catalog provides them.
+  Missing limits are filled from the official OpenCode catalog at
+  `https://models.opencode.ai/catalog.json`; gateway-provided values take
+  precedence.
 - `system-token-inventory.zh-CN.md` — Chinese notes about the system prompt and
   built-in tool token inventory.
 - `AGENTS.global.md` — file included by the `ronigooja` commits.
