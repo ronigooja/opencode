@@ -4,6 +4,7 @@ set -euo pipefail
 if (( $# > 0 )) && [[ "$1" == "-h" || "$1" == "--help" ]]; then
   cat <<'USAGE'
 Sync models from an OpenAI-compatible /models endpoint into opencode.json.
+The generated provider uses the current OpenCode configuration format.
 
 Required environment variables:
   OPENCODE_MODEL_CATALOG_URL  Model catalog URL, for example https://example.com/v1/models
@@ -34,6 +35,7 @@ fi
 
 response=$(mktemp /tmp/opencode-models.XXXXXX)
 updated=$(mktemp /tmp/opencode-config.XXXXXX)
+trap 'rm -f "$response" "$updated"' EXIT
 
 curl -fsS --connect-timeout 10 --max-time 30 \
   -H "Authorization: Bearer $api_key" \
@@ -63,10 +65,19 @@ models=$(jq -c '
   | map(select(.id | type == "string"))
   | map(select(.id | test("^(gpt-image|codex-auto-review)") | not))
   | unique_by(.id)
-  | map({
+  | map(. as $model | {
       key: .id,
       value: ({name: (.id | pretty_name)}
-        + (if (.created | type) == "number" then {releaseDate: (.created | todateiso8601[0:10])} else {} end))
+        + (if (.created | type) == "number" then {releaseDate: (.created | todateiso8601[0:10])} else {} end)
+        + ({
+            context: (["context_length", "context_window", "max_context_length", "context"]
+              | map(. as $key | $model[$key] | if type == "number" and isfinite and . > 0 then floor else null end)
+              | map(select(. != null)) | first),
+            output: (["max_output_length", "max_tokens", "output_token_limit", "output"]
+              | map(. as $key | $model[$key] | if type == "number" and isfinite and . > 0 then floor else null end)
+              | map(select(. != null)) | first)
+          } | with_entries(select(.value != null))
+          | if length == 0 then {} else {limit: .} end))
     })
   | from_entries
 ' "$response")
@@ -83,12 +94,33 @@ jq \
   --arg api_key "$api_key" \
   --arg default_model "$default_model" \
   --argjson models "$models" \
-  '.provider[$provider_id].npm = "@ai-sdk/openai-compatible"
-   | .provider[$provider_id].name = $provider_name
-   | .provider[$provider_id].options.baseURL = $base_url
-   | .provider[$provider_id].options.apiKey = $api_key
-   | .provider[$provider_id].models = $models
-   | if $default_model != "" then .provider[$provider_id].models[$default_model] //= {name: $default_model} else . end
+  '(.providers // {}) as $providers
+   | (.provider // {}) as $legacy_providers
+   | (($providers[$provider_id].models // {}) + ($legacy_providers[$provider_id].models // {})) as $existing_models
+   | .providers = $providers
+   | .providers[$provider_id] = ((.providers[$provider_id] // {})
+       + {
+           name: $provider_name,
+           package: "@opencode/ai/providers/openai-compatible",
+           settings: ((.providers[$provider_id].settings // {})
+             + {baseURL: $base_url, apiKey: $api_key}),
+           models: ($models | to_entries
+             | map(. as $entry
+                 | ($existing_models[$entry.key] // {}) as $base
+                 | ($entry.value.limit // {}) as $limit
+                 | {key: $entry.key, value:
+                     (($base * $entry.value)
+                       + (if ($limit | length) == 0
+                          then {}
+                          else {limit: (($base.limit // {}) * $limit)}
+                          end))})
+             | from_entries)
+         })
+   | if $default_model != "" then
+       .providers[$provider_id].models[$default_model] //= {name: $default_model}
+     else . end
+   | del(.provider[$provider_id])
+   | if (.provider // {}) == {} then del(.provider) else . end
   ' "$config" > "$updated"
 
 chmod 600 "$updated"
