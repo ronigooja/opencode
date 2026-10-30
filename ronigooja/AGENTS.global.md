@@ -5,6 +5,7 @@
 ## Language
 
 - When writing repository documentation, use English.
+- When writing repository documentation, write mainly for AI agents: keep it concise, define each fact once and link to it elsewhere, and optimize for selective reading rather than human browsing.
 
 ## Git baseline
 
