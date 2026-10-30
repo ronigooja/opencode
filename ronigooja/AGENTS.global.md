@@ -29,8 +29,6 @@
 - When running Apple builds or tests, use a GitHub-hosted macOS runner.
 - When a build or test would run outside a GitHub-hosted runner, ask the user for permission before running it unless it is a small test that can be run locally.
 
-- Small tests without additional components can be run locally.
-
 ## Downloads and installations
 
 - When downloading or installing anything, use `/tmp` for temporary or test-only files and `$HOME/environment` for persistent environment files and tools.
