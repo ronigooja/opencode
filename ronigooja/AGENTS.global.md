@@ -9,8 +9,8 @@
 
 ## Git baseline
 
-- When modifying files in a repository, first verify that the work is based on the latest `main` branch.
-- When changes are complete, if the working directory is a Git repository, commit them to the `main` branch.
+- When modifying files in a Git repository, first verify the work is based on the latest default branch (usually `main`).
+- When changes are complete in a Git repository, commit only the files you changed to the default branch.
 
 ## Sub-agents
 
@@ -25,11 +25,11 @@
 
 - When validating changes, run the builds and tests that match the change's impact and risk. Run full verification when the impact is unclear or a release requires it. Afterward, report the scope, results, and any coverage gaps.
 
-- Small tests can be run locally without additional components.
-
 - When running Linux builds or tests, use a GitHub-hosted Linux runner.
 - When running Apple builds or tests, use a GitHub-hosted macOS runner.
 - When a build or test would run outside a GitHub-hosted runner, ask the user for permission before running it unless it is a small test that can be run locally.
+
+- Small tests without additional components can be run locally.
 
 ## Downloads and installations
 
