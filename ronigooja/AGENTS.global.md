@@ -22,7 +22,7 @@
 
 ## Build and test
 
-- When validating changes, select necessary builds and tests based on their impact and risk. For isolated changes, prioritize the affected components; for changes involving shared interfaces, dependencies, security, or cross-component behavior, expand verification accordingly. Run full verification when the impact cannot be reliably bounded or release requirements demand it. After verification, report its scope, results, and material coverage limitations.
+- When validating changes, run the builds and tests that match the change's impact and risk. Run full verification when the impact is unclear or a release requires it. Afterward, report the scope, results, and any coverage gaps.
 
 - Small tests can be run locally without additional components.
 
