@@ -23,9 +23,17 @@ jobs:
           sparse-checkout: packages/cli/package.json
           sparse-checkout-cone-mode: false
 
+      # The suffix continues from the highest existing tag for this upstream version; run_number resets whenever
+      # the workflow file is renamed, which would reuse a tag.
       - name: Version
         id: version
-        run: echo "value=$(jq -r .version packages/cli/package.json)-ronigooja.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+        run: |
+          base=$(jq -r .version packages/cli/package.json)
+          last=$(gh api "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/v${base}-ronigooja." --jq '.[].ref' \
+            | sed -n 's|^refs/tags/v.*-ronigooja\.\([0-9][0-9]*\)$|\1|p' | sort -n | tail -n 1)
+          echo "value=${base}-ronigooja.$(( ${last:-0} + 1 ))" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   build:
     needs: version
