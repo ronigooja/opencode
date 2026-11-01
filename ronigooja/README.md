@@ -27,8 +27,30 @@ This directory contains the files contributed by `ronigooja` that are specific
   `releases/latest` and fetches `install` from the `dev` branch. Package
   managers (npm, pnpm, bun, yarn, vp, brew, winget) still use upstream
   packages. Only a binary built after this change uses the new source. The
-  fork publishes `linux-x64` and `linux-arm64` only, so `install` fails on
-  other targets and on baseline or musl variants.
+  fork publishes `linux-x64`, `linux-arm64` and `darwin-arm64` only, so
+  `install` fails on other targets and on baseline or musl variants.
+- `packages/cli/src/commands/handlers/default.ts` — the TUI's background update
+  check repeats every day instead of every 10 minutes. It still runs once at
+  startup, and `/update` and `opencode upgrade` check on demand.
+
+- `.github/workflows/ronigooja-cli.yml` — GitHub reads workflows only from
+  `.github/workflows/`, so this file cannot live here. It is a manual
+  (`workflow_dispatch`) build of the `linux-x64`, `linux-arm64` and
+  `darwin-arm64` CLI on GitHub-hosted runners, and publishes a GitHub Release
+  tagged `v<packages/cli version>-ronigooja.<run number>` with the `tar.gz`
+  files and `SHA256SUMS`. The macOS binary is ad-hoc signed, not notarized. The
+  upstream `release` workflow is skipped on this fork by its
+  `github.repository == 'anomalyco/opencode'` guard.
+- `install`, `packages/cli/src/services/updater.ts`, and
+  `packages/cli/test/updater-install.test.ts` — point the standalone (curl)
+  install and the built-in upgrade at this fork instead of `opencode.ai`.
+  `install` reads the latest GitHub release of `ronigooja/opencode` and
+  downloads `opencode-<target>.tar.gz` from it. The updater checks
+  `releases/latest` and fetches `install` from the `dev` branch. Package
+  managers (npm, pnpm, bun, yarn, vp, brew, winget) still use upstream
+  packages. Only a binary built after this change uses the new source. The
+  fork publishes `linux-x64`, `linux-arm64` and `darwin-arm64` only, so
+  `install` fails on other targets and on baseline or musl variants.
 - `packages/cli/src/commands/handlers/default.ts` — the TUI's background update
   check repeats every day instead of every 10 minutes. It still runs once at
   startup, and `/update` and `opencode upgrade` check on demand.

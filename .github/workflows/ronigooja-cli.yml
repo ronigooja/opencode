@@ -1,4 +1,4 @@
-name: ronigooja-linux-cli
+name: ronigooja-cli
 
 on:
   workflow_dispatch:
@@ -37,6 +37,8 @@ jobs:
             runner: ubuntu-24.04
           - target: linux-arm64
             runner: ubuntu-24.04-arm
+          - target: darwin-arm64
+            runner: macos-15
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -64,13 +66,17 @@ jobs:
           OPENCODE_MODELS_SNAPSHOT: ${{ github.workspace }}/.cache/models-catalog/api.json
           GH_TOKEN: ${{ github.token }}
 
+      - name: Sign
+        if: startsWith(matrix.target, 'darwin-')
+        run: codesign --force --options runtime --entitlements .github/release/entitlements/cli.plist --sign - packages/cli/dist/cli-${{ matrix.target }}/bin/opencode
+
       - name: Verify bundled models catalog
         run: bun packages/cli/script/catalog-smoke.ts packages/cli/dist/cli-${{ matrix.target }}/bin/opencode
         env:
           OPENCODE_MODELS_SNAPSHOT: ${{ github.workspace }}/.cache/models-catalog/api.json
 
       - name: Package
-        run: tar -czf opencode-${{ matrix.target }}.tar.gz -C packages/cli/dist/cli-${{ matrix.target }}/bin opencode
+        run: COPYFILE_DISABLE=1 tar -czf opencode-${{ matrix.target }}.tar.gz -C packages/cli/dist/cli-${{ matrix.target }}/bin opencode
 
       - name: Upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -89,19 +95,19 @@ jobs:
       - name: Download
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: opencode-linux-*
+          pattern: opencode-*
           merge-multiple: true
 
       - name: Checksums
-        run: sha256sum opencode-linux-*.tar.gz > SHA256SUMS
+        run: sha256sum opencode-*.tar.gz > SHA256SUMS
 
       - name: Publish
         run: |
-          gh release create "v${VERSION}" opencode-linux-*.tar.gz SHA256SUMS \
+          gh release create "v${VERSION}" opencode-*.tar.gz SHA256SUMS \
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
             --title "v${VERSION}" \
-            --notes "Linux x64 and arm64 CLI built from ${{ github.sha }}."
+            --notes "Linux x64, Linux arm64 and macOS arm64 CLI built from ${{ github.sha }}."
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.value }}
