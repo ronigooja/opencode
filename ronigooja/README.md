@@ -29,6 +29,9 @@ This directory contains the files contributed by `ronigooja` that are specific
   packages. Only a binary built after this change uses the new source. The
   fork publishes `linux-x64` and `linux-arm64` only, so `install` fails on
   other targets and on baseline or musl variants.
+- `packages/cli/src/commands/handlers/default.ts` — the TUI's background update
+  check repeats every day instead of every 10 minutes. It still runs once at
+  startup, and `/update` and `opencode upgrade` check on demand.
 
 - `.github/workflows/ronigooja-linux-cli.yml` — GitHub reads workflows only from
   `.github/workflows/`, so this file cannot live here. It is a manual
