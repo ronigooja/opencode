@@ -56,6 +56,7 @@ function fixture(
               const url = input instanceof Request ? input.url : input.toString()
               requests.push(url)
               if (new URL(url).hostname === "formulae.brew.sh") return Response.json({ versions: { stable: "2.0.21" } })
+              if (new URL(url).hostname === "api.github.com") return Response.json({ tag_name: "v2.3.5" })
               return Response.json({ version: "2.3.4", metadata: { package: releasePackage } })
             },
             { preconnect: fetch.preconnect },
@@ -226,7 +227,7 @@ it.live("bun ignores install cache cleanup failures", () =>
       const installer = test.commands[0]?.[3]
       expect(installer).toStartWith(path.join(test.global.cache, "update-"))
       expect(test.commands).toEqual([
-        ["curl", "-fsSL", "-o", installer, "https://opencode.ai/v2/install"],
+        ["curl", "-fsSL", "-o", installer, "https://raw.githubusercontent.com/ronigooja/opencode/dev/install"],
         ...(failure === "download" ? [] : [[test.bash, installer, "--version", "2.3.4-beta.1", "--no-modify-path"]]),
       ])
       expect(yield* test.fs.readDirectory(test.global.cache)).toEqual([])
@@ -235,6 +236,17 @@ it.live("bun ignores install cache cleanup failures", () =>
     }),
   )
 })
+
+it.live("standalone installs follow the latest GitHub release of this fork", () =>
+  Effect.gen(function* () {
+    const test = yield* fixture()
+    const release = "https://api.github.com/repos/ronigooja/opencode/releases/latest"
+    expect(yield* test.updater.latest("curl")).toBe("2.3.5")
+    // An unrecognized installation is a standalone binary too.
+    expect(yield* test.updater.latest()).toBe("2.3.5")
+    expect(test.requests).toEqual([release, release])
+  }),
+)
 
 it.live("invalid version targets never execute a command or create a cache", () =>
   Effect.gen(function* () {

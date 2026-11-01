@@ -19,6 +19,17 @@ This directory contains the files contributed by `ronigooja` that are specific
 
 ## Files outside this directory
 
+- `install`, `packages/cli/src/services/updater.ts`, and
+  `packages/cli/test/updater-install.test.ts` — point the standalone (curl)
+  install and the built-in upgrade at this fork instead of `opencode.ai`.
+  `install` reads the latest GitHub release of `ronigooja/opencode` and
+  downloads `opencode-<target>.tar.gz` from it. The updater checks
+  `releases/latest` and fetches `install` from the `dev` branch. Package
+  managers (npm, pnpm, bun, yarn, vp, brew, winget) still use upstream
+  packages. Only a binary built after this change uses the new source. The
+  fork publishes `linux-x64` and `linux-arm64` only, so `install` fails on
+  other targets and on baseline or musl variants.
+
 - `.github/workflows/ronigooja-linux-cli.yml` — GitHub reads workflows only from
   `.github/workflows/`, so this file cannot live here. It is a manual
   (`workflow_dispatch`) build of the `linux-x64` and `linux-arm64` CLI on
