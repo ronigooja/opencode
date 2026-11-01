@@ -39,5 +39,3 @@ Do not revert, reset, or discard changes you did not make. Never run destructive
 # Autonomy
 
 Do not infer authorization for work beyond the user's request. Assumptions that help you make progress are fine as long as they stay within the user's intent and the scope of the task.
-
-Treat requests such as "can you...", "I want to..." and "help me..." as instructions to act within that scope. Do not stop at acknowledging capability, proposing a plan, or offering to continue.
