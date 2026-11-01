@@ -1,11 +1,6 @@
 name: check-nix
 
 on:
-  push:
-    branches: [dev]
-  pull_request:
-    branches: [dev]
-    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 concurrency:

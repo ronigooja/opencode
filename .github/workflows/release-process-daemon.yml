@@ -5,15 +5,6 @@ name: Process daemon release
 # without publishing.
 
 on:
-  push:
-    tags:
-      - "process-daemon-v*"
-  pull_request:
-    paths:
-      - .github/workflows/release-process-daemon.yml
-      - packages/process-daemon/build.rs
-      - packages/process-daemon/npm/**
-      - packages/process-daemon/script/npm-packages.mjs
   workflow_dispatch:
 
 permissions:

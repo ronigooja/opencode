@@ -32,6 +32,12 @@ This directory contains the files contributed by `ronigooja` that are specific
 - `packages/cli/src/commands/handlers/default.ts` — the TUI's background update
   check repeats every day instead of every 10 minutes. It still runs once at
   startup, and `/update` and `opencode upgrade` check on demand.
+- `.github/workflows/{check,check-test,check-nix,check-process-daemon,release,release-process-daemon,bot-nix-hashes,bot-docs-locale,deploy,deploy-www,deploy-update,deploy-files,deploy-posts,deploy-changelog}.yml`
+  — the `push` and `pull_request` triggers are removed, leaving only
+  `workflow_dispatch`. This fork has no `blacksmith-4vcpu-ubuntu-2404` runner,
+  so every push queued runs that never started. The jobs are unchanged and can
+  still be started manually. When syncing upstream, expect conflicts in the
+  `on:` block of these files and keep this fork's version.
 - `.github/workflows/ronigooja-cli.yml` — GitHub reads workflows only from
   `.github/workflows/`, so this file cannot live here. It is a manual
   (`workflow_dispatch`) build of the `linux-x64`, `linux-arm64` and

@@ -1,11 +1,7 @@
 name: bot-docs-locale
 
 on:
-  push:
-    branches:
-      - dev
-    paths:
-      - packages/web/src/content/docs/*.mdx
+  workflow_dispatch:
 
 jobs:
   sync-locales:

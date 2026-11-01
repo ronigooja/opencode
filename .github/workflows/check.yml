@@ -1,11 +1,6 @@
 name: check
 
 on:
-  push:
-    branches: [dev]
-  pull_request:
-    branches: [dev, beta]
-    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 concurrency:

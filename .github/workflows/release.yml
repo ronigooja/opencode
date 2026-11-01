@@ -10,8 +10,6 @@ run-name: "${{ format('release {0}{1}', inputs.bump, inputs.version) }}"
 # .github/release/ and this file are the security boundary for releases.
 
 on:
-  push:
-    branches: [dev, beta]
   workflow_dispatch:
     inputs:
       bump:
