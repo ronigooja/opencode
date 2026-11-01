@@ -17,6 +17,16 @@ This directory contains the files contributed by `ronigooja` that are specific
   built-in tool token inventory.
 - `AGENTS.global.md` — file included by the `ronigooja` commits.
 
+## Files outside this directory
+
+- `.github/workflows/ronigooja-linux-cli.yml` — GitHub reads workflows only from
+  `.github/workflows/`, so this file cannot live here. It is a manual
+  (`workflow_dispatch`) build of the `linux-x64` and `linux-arm64` CLI on
+  GitHub-hosted runners, and publishes a GitHub Release tagged
+  `v<packages/cli version>-ronigooja.<run number>` with two `tar.gz` files and
+  `SHA256SUMS`. The upstream `release` workflow is skipped on this fork by its
+  `github.repository == 'anomalyco/opencode'` guard.
+
 The local launchd job uses the installed copy at
 `/Users/zhuwei/environment/bin/opencode-sync-models`. The repository script is
 installed there manually when it changes; the launchd job itself is defined by
