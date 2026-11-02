@@ -50,6 +50,7 @@
 
 - When waiting for an update at a specific location, estimate the expected wait time and avoid polling too frequently.
 
-## Action transparency
+## Alignment before changes
 
-Before starting a task, make sure the user knows what you plan to do.
+- When a request would modify files or run state-changing commands, first state your understanding and plan, then wait for the user's confirmation before changing anything. Skip the wait only when the user explicitly says to proceed.
+- When the user asks a question, answer only and do not edit files.
