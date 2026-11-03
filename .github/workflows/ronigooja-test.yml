@@ -6,6 +6,9 @@ on:
       files:
         description: Test files to run in packages/core, space separated
         default: test/plugin/optimize.test.ts
+      ref:
+        description: Commit, tag or branch to check out instead of the dispatched ref
+        default: ""
 
 permissions:
   contents: read
@@ -23,6 +26,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.ref }}
 
       - name: Set up Bun
         uses: ./.github/actions/setup-bun
