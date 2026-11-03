@@ -39,7 +39,9 @@ jobs:
           GITHUB_ACTIONS: "false"
 
       - name: Typecheck
+        if: ${{ !cancelled() }}
         run: bun typecheck
 
       - name: Typecheck with tsc
+        if: ${{ !cancelled() }}
         run: bun run typecheck:tsc
