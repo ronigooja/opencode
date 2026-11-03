@@ -47,6 +47,15 @@ This directory contains the files contributed by `ronigooja` that are specific
   unclear intent; it defers to that question rule. Answers of about ten lines or
   fewer use plain prose. Only a binary built after this change uses the new
   text.
+- `packages/core/src/plugin/optimize.ts` — `OpenAIPlugin` reads
+  `<config dir>/prompts/gpt.txt` or `gpt-astra.txt` on every request and uses it
+  instead of the built-in template of the same name. The model-based choice
+  between the two is unchanged, `${OPENCODE_TOOL_GUIDANCE}` is still rendered,
+  and an agent with its own `system` still skips the plugin. A missing,
+  unreadable or empty file falls back to the built-in template. The config dir
+  is `OPENCODE_CONFIG_DIR` when set, otherwise the global config directory
+  (`~/.config/opencode`). Editing the file needs no rebuild or restart. When
+  syncing upstream, expect conflicts in `make` and `OpenAIPlugin`.
 - `.github/workflows/ronigooja-cli.yml` — GitHub reads workflows only from
   `.github/workflows/`, so this file cannot live here. It is a manual
   (`workflow_dispatch`) build of the `linux-x64`, `linux-arm64` and

@@ -3,7 +3,10 @@ export * as OptimizePlugin from "./optimize.js"
 import { define, type Context } from "@opencode/plugin/effect/plugin"
 import type { SessionHooks } from "@opencode/plugin/effect/session"
 import { Model } from "@opencode/schema/model"
+import { FSUtil } from "@opencode/util/fs-util"
+import { Global } from "@opencode/util/global"
 import { Effect } from "effect"
+import path from "path"
 import { SessionSystemPrompt } from "../session/system-prompt.js"
 
 import PROMPT_GPT from "./system-prompt/gpt.txt"
@@ -13,11 +16,20 @@ import PROMPT_META from "./system-prompt/meta.txt"
 import PROMPT_TRINITY from "./system-prompt/trinity.txt"
 import PROMPT_ANTHROPIC from "./system-prompt/anthropic.txt"
 
-export const OpenAIPlugin = make("opencode.prompt.openai", (model) => {
-  const id = model.id.toLowerCase()
-  if (!id.includes("gpt")) return undefined
-  return id.includes("astra") ? PROMPT_ASTRA : PROMPT_GPT
-})
+// A file with the same name in `<config dir>/prompts/` replaces the built-in template on every request.
+export const OpenAIPlugin = make(
+  "opencode.prompt.openai",
+  (model) => {
+    const id = model.id.toLowerCase()
+    if (!id.includes("gpt")) return undefined
+    return id.includes("astra") ? PROMPT_ASTRA : PROMPT_GPT
+  },
+  "override",
+  new Map([
+    [PROMPT_GPT, "gpt.txt"],
+    [PROMPT_ASTRA, "gpt-astra.txt"],
+  ]),
+)
 
 export const AnthropicPlugin = make(
   "opencode.prompt.anthropic",
@@ -79,20 +91,29 @@ function make(
   id: string,
   optimize: (model: Model.Info, tools: SessionHooks["context"]["tools"]) => string | undefined,
   mode: "override" | "append" = "override",
+  files: ReadonlyMap<string, string> = new Map(),
 ) {
   return define({
     id,
     effect: Effect.fn(`OptimizePlugin.${id}`)(function* (ctx) {
+      const fs = yield* FSUtil.Service
+      const global = yield* Global.Service
       const hook = (event: SessionHooks["context"]) =>
         Effect.gen(function* () {
           const model = yield* resolveModel(ctx, event)
           // Curate tools before rendering their guidance, including for agents with a custom system prompt.
-          const template = optimize(model, event.tools)
-          if (!template) return
+          const builtin = optimize(model, event.tools)
+          if (!builtin) return
           if ((yield* ctx.agent.get({ agentID: event.agent })).data.system) return
           const system = event.system[0]
           if (!system) return
-          const rendered = SessionSystemPrompt.render(template, Object.keys(event.tools))
+          const file = files.get(builtin)
+          const custom = file
+            ? (yield* fs
+                .readFileStringSafe(path.join(global.config, "prompts", file))
+                .pipe(Effect.orElseSucceed(() => undefined)))?.trim()
+            : undefined
+          const rendered = SessionSystemPrompt.render(custom || builtin, Object.keys(event.tools))
           const text = mode === "append" ? `${system.text}\n\n${rendered}` : rendered
           event.system[0] = { ...system, text }
         }).pipe(Effect.catch(() => Effect.void))
