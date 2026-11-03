@@ -17,7 +17,7 @@ import fs from "fs/promises"
 import os from "os"
 import path from "path"
 import { testEffect } from "../lib/effect"
-import { makePluginTestLayer } from "./fixture"
+import { PluginTestLayer } from "./fixture"
 import PROMPT_META from "../../src/plugin/system-prompt/meta.txt"
 import PROMPT_GPT from "../../src/plugin/system-prompt/gpt.txt"
 import PROMPT_ASTRA from "../../src/plugin/system-prompt/gpt-astra.txt"
@@ -27,7 +27,11 @@ import PROMPT_ANTHROPIC from "../../src/plugin/system-prompt/anthropic.txt"
 
 // Keep the user's real config directory out of the test; it may hold prompt overrides.
 const configDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-optimize-test-"))
-const it = testEffect(makePluginTestLayer(undefined, undefined, Global.layerWith({ config: configDir })))
+const base = testEffect(PluginTestLayer)
+const it = {
+  effect: <A, E, R>(name: string, body: () => Effect.Effect<A, E, R>) =>
+    base.effect(name, () => body().pipe(Effect.provide(Global.layerWith({ config: configDir })))),
+}
 const fallback = SessionSystemPrompt.make([])
 const appended = `${fallback}\n\n${SessionSystemPrompt.render(PROMPT_ANTHROPIC, [])}`
 const makeHost = Effect.gen(function* () {

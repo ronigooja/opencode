@@ -86,11 +86,7 @@ const permissionLayer = Layer.succeed(
   }),
 )
 
-export const makePluginTestLayer = (
-  permission = permissionLayer,
-  generate = generateLayer,
-  global?: Layer.Layer<Global.Service>,
-) =>
+export const makePluginTestLayer = (permission = permissionLayer, generate = generateLayer) =>
   AppNodeBuilder.build(
     LayerNode.group([
       AppProcess.node,
@@ -146,7 +142,6 @@ export const makePluginTestLayer = (
       Generate.node.replace(generate),
       Permission.node.replace(permission),
       offlineModels,
-      ...(global ? [Global.node.replace(global)] : []),
     ],
   ).pipe(Layer.provideMerge(configLayer))
 
