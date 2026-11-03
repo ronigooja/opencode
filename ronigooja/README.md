@@ -38,6 +38,15 @@ This directory contains the files contributed by `ronigooja` that are specific
   so every push queued runs that never started. The jobs are unchanged and can
   still be started manually. When syncing upstream, expect conflicts in the
   `on:` block of these files and keep this fork's version.
+- `packages/core/src/plugin/system-prompt/gpt.txt` and `gpt-astra.txt` — add an
+  `# Investigating` section and two Final Answer sentences. GPT models now run
+  read-only checks before naming a cause, label each claim as verified or
+  inferred, re-check their own side before suggesting user error, and ask one
+  short question when a request has more than one plausible meaning. In
+  `gpt-astra.txt` the question rule covers only question and diagnosis requests,
+  because its Autonomy section tells the model to proceed on unclear task
+  intent. Answers of about ten lines or fewer use plain prose. Only a binary
+  built after this change uses the new text.
 - `.github/workflows/ronigooja-cli.yml` — GitHub reads workflows only from
   `.github/workflows/`, so this file cannot live here. It is a manual
   (`workflow_dispatch`) build of the `linux-x64`, `linux-arm64` and
