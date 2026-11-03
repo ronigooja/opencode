@@ -18,13 +18,23 @@ This directory contains the files contributed by `ronigooja` that are specific
     resellers publish conflicting values for the same model id. The base URL and key come from `OPENCODE_BASE_URL` and
     `OPENCODE_API_KEY`, then from `providers.<id>.settings` in `opencode.json`.
     `~/.codex/config.toml` is no longer read.
-  - `route` sets the `model` of the agents listed in the routing preferences
-    from `best.json` of the IQ monitor API (`https://iq.z0e.dev/monitor`), as
-    `agents.<name>.model` = `provider/model#effort` in `opencode.json`. It skips
-    an agent when no model is eligible or the model is not in the provider.
-  - `config` is an interactive menu for the API address and key, the global and
-    per-dimension `exclude` keywords, the agent-to-dimension routes and the
-    intervals. `route --dry-run` and `sync --dry-run` preview without writing.
+  - `route` creates one subagent per dimension that the IQ monitor API
+    (`https://iq.z0e.dev/monitor`) lists in `dimensions.json`, named
+    `dim-<dimension>` in `agents` of `opencode.json`: `mode` is `subagent`,
+    `description` is the dimension's `use_when`, and `model` is
+    `provider/model#effort` from `best.json`. The main model picks a subagent
+    from these descriptions (the `subagent` tool lists each subagent's
+    description), so the routing is by task type. A new dimension of the API
+    gets an agent without a script change, and a dimension that disappears loses
+    its agent; agents without the `dim-` prefix, such as `explore` and
+    `general`, are never touched. When no model is eligible the dimension's
+    `fallback` in the preferences is used, or the agent is not created. The
+    agents deny `question` and `subagent`, like the built-in `general`.
+  - `config` is an interactive menu for the API address and key, the global
+    `exclude` keywords, the per-dimension `exclude` keywords and `fallback`
+    (the dimension list comes from the API; unconfigured dimensions are marked
+    `*` and get no exclude rule) and the intervals. `route --dry-run` and
+    `sync --dry-run` preview without writing.
   - `install` copies the script to `~/Agents/environment/bin` and schedules
     `sync` (default once per 86400 s) and `route` (default every 1800 s) with
     launchd; it also removes the old `opencode-sync-models` job and copy.

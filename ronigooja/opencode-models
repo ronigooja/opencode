@@ -8,6 +8,8 @@ prefs=${OPENCODE_MODEL_ROUTING:-${config:h}/model-routing.json}
 bin_dir=$HOME/Agents/environment/bin
 launch_dir=$HOME/Library/LaunchAgents
 lock_dir=/tmp/opencode-models.lock
+# route owns the agents whose id starts with this prefix, one per dimension of the API.
+agent_prefix=dim-
 
 typeset -a tmpfiles
 held=0
@@ -24,7 +26,7 @@ Usage: $name <command>
 
 Commands:
   sync [--dry-run]    Sync the OpenAI-compatible model catalog into opencode.json
-  route [--dry-run]   Set subagent models from the best.json recommendation
+  route [--dry-run]   Create one dim-<dimension> subagent per dimension of the API, with the best.json model
   config              Interactive menu for the API address, key and routing preferences
   install             Install to $bin_dir and schedule sync and route with launchd
   uninstall           Remove the launchd jobs and the installed copy
@@ -55,9 +57,8 @@ default_prefs='{
     "instruction": {"exclude": ["claude"]},
     "write_zh": {"exclude": ["claude"]},
     "write_en": {"exclude": ["claude"]},
-    "ui": {"exclude": ["gpt", "opus", "sonnet", "fable"]}
-  },
-  "agents": {"explore": "code", "general": "reasoning"}
+    "ui": {"exclude": ["gpt", "opus", "sonnet", "fable"], "fallback": "cliproxyapi/claude-haiku-5-5"}
+  }
 }'
 
 mk() {
@@ -274,62 +275,97 @@ cmd_route() {
   settings
   require_config
 
-  local api
+  local api dimensions best
   api=$(pref '.api // "https://iq.z0e.dev/monitor"')
+  mk; dimensions=$REPLY
+  curl -fsS --connect-timeout 10 --max-time 30 "${api%/}/dimensions.json?_shape=array" > "$dimensions"
+  if ! jq -e 'type == "array" and length > 0' "$dimensions" >/dev/null; then
+    print -u2 "Unexpected dimensions.json response"
+    exit 1
+  fi
+
+  # The exclude keywords are applied per dimension, taken from the dimensions the API lists now.
   local query="_shape=array" keywords dim
   keywords=$(pref '.exclude // [] | map(@uri) | join(",")')
   [[ -n $keywords ]] && query+="&exclude=$keywords"
-  for dim in $(pref '.dims // {} | keys[]'); do
+  for dim in $(jq -r '.[].dim' "$dimensions"); do
     keywords=$(pref --arg d "$dim" '.dims[$d].exclude // [] | map(@uri) | join(",")')
     [[ -n $keywords ]] && query+="&exclude_$dim=$keywords"
   done
 
-  local response
-  mk; response=$REPLY
-  curl -fsS --connect-timeout 10 --max-time 30 "${api%/}/best.json?$query" > "$response"
-  if ! jq -e 'type == "array"' "$response" >/dev/null; then
+  mk; best=$REPLY
+  curl -fsS --connect-timeout 10 --max-time 30 "${api%/}/best.json?$query" > "$best"
+  if ! jq -e 'type == "array"' "$best" >/dev/null; then
     print -u2 "Unexpected best.json response"
     exit 1
   fi
 
-  local updates='{}' agent row model effort ref current
-  while IFS=$'\t' read -r agent dim; do
-    row=$(jq -c --arg d "$dim" '.[] | select(.dim == $d)' "$response")
+  # One agent per dimension: description from use_when, model from best.json or the dimension's fallback.
+  local desired='{}' row model effort ref fallback
+  while IFS= read -r dim; do
+    row=$(jq -c --arg d "$dim" '.[] | select(.dim == $d)' "$best")
     model=$(jq -r '.model // empty' <<< "${row:-{\}}")
     effort=$(jq -r '.effort // empty' <<< "${row:-{\}}")
-    if [[ -z $model ]]; then
-      print "skip $agent ($dim): no eligible model"
-      continue
+    ref=""
+    if [[ -n $model ]]; then
+      if jq -e --arg p "$provider_id" --arg m "$model" '.providers[$p].models | has($m)' "$config" >/dev/null 2>&1; then
+        ref="$provider_id/$model${effort:+#$effort}"
+      else
+        print "skip $agent_prefix$dim: $model is not in provider $provider_id"
+      fi
     fi
-    if ! jq -e --arg p "$provider_id" --arg m "$model" '.providers[$p].models | has($m)' "$config" >/dev/null 2>&1; then
-      print "skip $agent ($dim): $model is not in provider $provider_id"
-      continue
+    if [[ -z $ref ]]; then
+      fallback=$(pref --arg d "$dim" '.dims[$d].fallback // empty')
+      if [[ -n $fallback ]]; then
+        ref=$fallback
+        print "fallback $agent_prefix$dim: $ref"
+      else
+        print "none $agent_prefix$dim: no eligible model"
+        continue
+      fi
     fi
-    ref="$provider_id/$model${effort:+#$effort}"
-    current=$(jq -r --arg a "$agent" '.agents[$a].model // ""' "$config")
-    if [[ $current == "$ref" ]]; then
-      print "keep $agent ($dim): $ref"
-      continue
-    fi
-    print "set  $agent ($dim): ${current:-<none>} -> $ref"
-    updates=$(jq -c --arg a "$agent" --arg r "$ref" '. + {($a): $r}' <<< "$updates")
-  done < <(pref '.agents // {} | to_entries[] | "\(.key)\t\(.value)"')
+    desired=$(jq -c --arg a "$agent_prefix$dim" --arg r "$ref" --argjson d "$(jq -c --arg d "$dim" '.[] | select(.dim == $d)' "$dimensions")" \
+      '. + {($a): {model: $r, description: $d.use_when}}' <<< "$desired")
+  done < <(jq -r '.[].dim' "$dimensions")
 
-  if [[ $updates == '{}' ]]; then
+  # Agents with the prefix that are no longer wanted are removed; other agents are never touched.
+  local updated
+  mk; updated=$REPLY
+  jq --argjson desired "$desired" --arg prefix "$agent_prefix" '
+    (.agents // {}) as $current
+    | .agents = (
+        ($current | with_entries(select(.key | startswith($prefix) | not)))
+        + ($desired | with_entries(
+            .key as $id | .value = (
+              ($current[$id] // {})
+              + {mode: "subagent", model: .value.model, description: .value.description}
+              + (if ($current[$id].permissions // null) == null
+                 then {permissions: [
+                   {action: "question", resource: "*", effect: "deny"},
+                   {action: "subagent", resource: "*", effect: "deny"}
+                 ]}
+                 else {} end)
+            )))
+      )
+    | if .agents == {} then del(.agents) else . end
+  ' "$config" > "$updated"
+
+  local changes
+  changes=$(diff <(jq -S '.agents // {} | with_entries(select(.key | startswith($p))) | map_values({model, description})' --arg p "$agent_prefix" "$config") \
+    <(jq -S '.agents // {} | with_entries(select(.key | startswith($p))) | map_values({model, description})' --arg p "$agent_prefix" "$updated") || true)
+  if [[ -z $changes ]]; then
     print "No changes"
     return 0
   fi
+  print "$changes"
   if (( dry )); then
     print "Dry run: nothing written"
     return 0
   fi
 
   lock
-  local updated
-  mk; updated=$REPLY
-  jq --argjson u "$updates" '.agents = ((.agents // {}) * ($u | map_values({model: .})))' "$config" > "$updated"
   write_config "$updated"
-  print "Updated $(jq 'length' <<< "$updates") agent model(s) in $config"
+  print "Updated $agent_prefix agents in $config"
 }
 
 # Strips the leading and trailing spaces of comma separated keywords into a JSON array.
@@ -379,28 +415,31 @@ menu_global() {
   pref_set --argjson v "$REPLY" '.exclude = $v'
 }
 
+# The dimensions come from the API, so a new dimension shows up here without a script change.
 menu_dim() {
-  local dim
-  print "Dimension:"
-  select dim in $(pref '.dims // {} | keys[]'); do break; done
+  local dim api dims
+  api=$(pref '.api // "https://iq.z0e.dev/monitor"')
+  dims=$(curl -fsS --connect-timeout 10 --max-time 30 "${api%/}/dimensions.json?_shape=array" | jq -r '.[].dim') || {
+    print "Could not read the dimensions from $api"
+    return 0
+  }
+  print "Dimension (exclude keywords; * = not configured yet):"
+  local labels=() d
+  for d in ${(f)dims}; do
+    labels+=("$d$(pref --arg d "$d" 'if .dims[$d] then "" else " *" end')")
+  done
+  select dim in $labels; do break; done
   [[ -z ${dim:-} ]] && return 0
-  ask_keywords "$(pref --arg d "$dim" '.dims[$d].exclude // [] | join(",")')" || return 0
-  pref_set --arg d "$dim" --argjson v "$REPLY" '.dims[$d].exclude = $v'
-}
-
-menu_agents() {
-  local agent dim
-  print "Current routes:"
-  pref '.agents // {} | to_entries[] | "  \(.key) -> \(.value)"'
-  read "agent?Subagent name: "
-  [[ -z $agent ]] && return 0
-  print "Dimension for $agent (Remove deletes the route):"
-  select dim in Remove $(pref '.dims // {} | keys[]'); do break; done
-  [[ -z ${dim:-} ]] && return 0
-  if [[ $dim == Remove ]]; then
-    pref_set --arg a "$agent" 'del(.agents[$a])'
+  dim=${dim% \*}
+  ask_keywords "$(pref --arg d "$dim" '.dims[$d].exclude // [] | join(",")')" || true
+  [[ -n ${REPLY:-} ]] && pref_set --arg d "$dim" --argjson v "$REPLY" '.dims[$d].exclude = $v'
+  local fallback
+  read "fallback?Fallback model when none is eligible [$(pref --arg d "$dim" '.dims[$d].fallback // ""')] (- clears): "
+  [[ -z $fallback ]] && return 0
+  if [[ $fallback == "-" ]]; then
+    pref_set --arg d "$dim" 'del(.dims[$d].fallback)'
   else
-    pref_set --arg a "$agent" --arg d "$dim" '.agents[$a] = $d'
+    pref_set --arg d "$dim" --arg v "$fallback" '.dims[$d].fallback = $v'
   fi
 }
 
@@ -424,15 +463,14 @@ cmd_config() {
   PS3="> "
   while true; do
     print "\n$name config"
-    select choice in "Show settings" "API address and key" "Global exclude" "Dimension exclude" "Agent routes" "Intervals" "Preview route" "Preview sync" "Quit"; do
+    select choice in "Show settings" "API address and key" "Global exclude" "Dimension settings" "Intervals" "Preview route" "Preview sync" "Quit"; do
       break
     done
     case ${choice:-Quit} in
       "Show settings") menu_show ;;
       "API address and key") menu_api ;;
       "Global exclude") menu_global ;;
-      "Dimension exclude") menu_dim ;;
-      "Agent routes") menu_agents ;;
+      "Dimension settings") menu_dim ;;
       "Intervals") menu_intervals ;;
       "Preview route") ( cmd_route --dry-run ) || true ;;
       "Preview sync") ( cmd_sync --dry-run ) || true ;;
