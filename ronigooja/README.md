@@ -13,7 +13,9 @@ This directory contains the files contributed by `ronigooja` that are specific
     model context/input/output limits when the gateway catalog provides them.
     Missing limits are filled from the official OpenCode catalog at
     `https://models.opencode.ai/catalog.json`; gateway-provided values take
-    precedence. The base URL and key come from `OPENCODE_BASE_URL` and
+    precedence. Only first-party providers (`anthropic`, `openai`; override with
+    `officialProviders` in the routing preferences) supply limits, because
+    resellers publish conflicting values for the same model id. The base URL and key come from `OPENCODE_BASE_URL` and
     `OPENCODE_API_KEY`, then from `providers.<id>.settings` in `opencode.json`.
     `~/.codex/config.toml` is no longer read.
   - `route` sets the `model` of the agents listed in the routing preferences
