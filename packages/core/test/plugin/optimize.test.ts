@@ -27,11 +27,7 @@ import PROMPT_ANTHROPIC from "../../src/plugin/system-prompt/anthropic.txt"
 
 // Keep the user's real config directory out of the test; it may hold prompt overrides.
 const configDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-optimize-test-"))
-const base = testEffect(PluginTestLayer)
-const it = {
-  effect: <A, E, R>(name: string, body: () => Effect.Effect<A, E, R>) =>
-    base.effect(name, () => body().pipe(Effect.provide(Global.layerWith({ config: configDir })))),
-}
+const it = testEffect(PluginTestLayer)
 const fallback = SessionSystemPrompt.make([])
 const appended = `${fallback}\n\n${SessionSystemPrompt.render(PROMPT_ANTHROPIC, [])}`
 const makeHost = Effect.gen(function* () {
@@ -40,6 +36,15 @@ const makeHost = Effect.gen(function* () {
   yield* agents.transform((editor) => editor.update(Agent.ID.make("build"), () => {}))
   return yield* PluginHost.make(plugins)
 })
+
+// The OpenAI plugin reads Global when it registers, so the temporary config dir is provided only here.
+const registerPlugins = (
+  host: Effect.Success<typeof makeHost>,
+  plugins: ReadonlyArray<(typeof OptimizePlugin.Plugins)[number]> = OptimizePlugin.Plugins,
+) =>
+  Effect.forEach(plugins, (plugin) => plugin.effect(host), { discard: true }).pipe(
+    Effect.provide(Global.layerWith({ config: configDir })),
+  )
 
 const context = (id: string, system = fallback): SessionHooks["context"] => ({
   sessionID: Session.ID.make("ses_model_optimization"),
@@ -79,9 +84,7 @@ describe("OptimizePlugin", () => {
           model.name = "Muse Spark"
         })
       })
-      yield* Effect.forEach(OptimizePlugin.Plugins, (plugin) => plugin.effect(pluginHost), {
-        discard: true,
-      })
+      yield* registerPlugins(pluginHost)
       const cases = [
         ["gpt-5", PROMPT_GPT],
         ["gpt-4.1", PROMPT_GPT],
@@ -127,7 +130,7 @@ describe("OptimizePlugin", () => {
       yield* catalog.transform((editor) =>
         editor.models.update(Provider.ID.make("test"), Model.ID.make("gpt-5"), () => {}),
       )
-      yield* OptimizePlugin.OpenAIPlugin.effect(pluginHost)
+      yield* registerPlugins(pluginHost, [OptimizePlugin.OpenAIPlugin])
       const event = context("gpt-5")
       event.system.push(SystemPart.make("Project instructions"))
       event.tools.shell = { description: "Run a command", input: { type: "object" } }
@@ -152,7 +155,7 @@ describe("OptimizePlugin", () => {
         for (const id of ["gpt-5", "gpt-6-astra"])
           editor.models.update(Provider.ID.make("test"), Model.ID.make(id), () => {})
       })
-      yield* OptimizePlugin.OpenAIPlugin.effect(pluginHost)
+      yield* registerPlugins(pluginHost, [OptimizePlugin.OpenAIPlugin])
       yield* Effect.promise(async () => {
         await fs.mkdir(path.join(configDir, "prompts"), { recursive: true })
         await fs.writeFile(path.join(configDir, "prompts", "gpt.txt"), "Custom GPT\n${OPENCODE_TOOL_GUIDANCE}\n")
@@ -183,7 +186,7 @@ describe("OptimizePlugin", () => {
       yield* catalog.transform((editor) =>
         editor.models.update(Provider.ID.make("test"), Model.ID.make("gpt-5"), () => {}),
       )
-      yield* OptimizePlugin.OpenAIPlugin.effect(pluginHost)
+      yield* registerPlugins(pluginHost, [OptimizePlugin.OpenAIPlugin])
       yield* Effect.promise(async () => {
         await fs.mkdir(path.join(configDir, "prompts"), { recursive: true })
         await fs.writeFile(path.join(configDir, "prompts", "gpt.txt"), "  \n")
@@ -261,7 +264,7 @@ describe("OptimizePlugin", () => {
     Effect.gen(function* () {
       const hooks = yield* PluginHooks.Service
       const pluginHost = yield* makeHost
-      yield* OptimizePlugin.OpenAIPlugin.effect(pluginHost)
+      yield* registerPlugins(pluginHost, [OptimizePlugin.OpenAIPlugin])
       yield* OptimizePlugin.AnthropicToolsPlugin.effect(pluginHost)
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -333,9 +336,7 @@ describe("OptimizePlugin", () => {
         }),
       )
       const pluginHost = yield* makeHost
-      yield* Effect.forEach(OptimizePlugin.Plugins, (plugin) => plugin.effect(pluginHost), {
-        discard: true,
-      })
+      yield* registerPlugins(pluginHost)
       const event = context("gpt-5", "Custom agent prompt")
 
       yield* hooks.trigger("session", "context", event)
@@ -350,7 +351,7 @@ describe("OptimizePlugin", () => {
       const agents = yield* Agent.Service
       const hooks = yield* PluginHooks.Service
       const pluginHost = yield* makeHost
-      yield* OptimizePlugin.OpenAIPlugin.effect(pluginHost)
+      yield* registerPlugins(pluginHost, [OptimizePlugin.OpenAIPlugin])
       yield* OptimizePlugin.OpenAIToolsPlugin.effect(pluginHost)
       yield* agents.transform((editor) => editor.remove(Agent.ID.make("build")))
       const event = context("gpt-5")
@@ -402,7 +403,7 @@ describe("OptimizePlugin", () => {
             if (family) model.family = Model.Family.make(family)
           })
       })
-      yield* Effect.forEach(OptimizePlugin.Plugins, (plugin) => plugin.effect(pluginHost), { discard: true })
+      yield* registerPlugins(pluginHost)
       yield* Effect.forEach(
         cases,
         ([id, , , prompt]) =>
@@ -438,7 +439,7 @@ describe("OptimizePlugin", () => {
           model.name = "Muse Spark"
         })
       })
-      yield* Effect.forEach(OptimizePlugin.Plugins, (plugin) => plugin.effect(pluginHost), { discard: true })
+      yield* registerPlugins(pluginHost)
       yield* IdentityPlugin.Plugin.effect(pluginHost)
 
       const named = context("meta/muse-spark-1.1")

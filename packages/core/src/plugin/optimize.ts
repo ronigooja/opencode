@@ -5,7 +5,7 @@ import type { SessionHooks } from "@opencode/plugin/effect/session"
 import { Model } from "@opencode/schema/model"
 import { FSUtil } from "@opencode/util/fs-util"
 import { Global } from "@opencode/util/global"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import path from "path"
 import { SessionSystemPrompt } from "../session/system-prompt.js"
 
@@ -96,8 +96,9 @@ function make(
   return define({
     id,
     effect: Effect.fn(`OptimizePlugin.${id}`)(function* (ctx) {
-      const fs = yield* FSUtil.Service
-      const global = yield* Global.Service
+      // Optional so the plugin keeps its original requirements; without them the built-in template is used.
+      const fs = yield* Effect.serviceOption(FSUtil.Service)
+      const global = yield* Effect.serviceOption(Global.Service)
       const hook = (event: SessionHooks["context"]) =>
         Effect.gen(function* () {
           const model = yield* resolveModel(ctx, event)
@@ -108,11 +109,12 @@ function make(
           const system = event.system[0]
           if (!system) return
           const file = files.get(builtin)
-          const custom = file
-            ? (yield* fs
-                .readFileStringSafe(path.join(global.config, "prompts", file))
-                .pipe(Effect.orElseSucceed(() => undefined)))?.trim()
-            : undefined
+          const custom =
+            file && Option.isSome(fs) && Option.isSome(global)
+              ? (yield* fs.value
+                  .readFileStringSafe(path.join(global.value.config, "prompts", file))
+                  .pipe(Effect.orElseSucceed(() => undefined)))?.trim()
+              : undefined
           const rendered = SessionSystemPrompt.render(custom || builtin, Object.keys(event.tools))
           const text = mode === "append" ? `${system.text}\n\n${rendered}` : rendered
           event.system[0] = { ...system, text }
