@@ -1,0 +1,45 @@
+name: ronigooja-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      files:
+        description: Test files to run in packages/core, space separated
+        default: test/plugin/optimize.test.ts
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: packages/core
+    steps:
+      - name: Check out
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Configure git identity
+        working-directory: .
+        run: |
+          git config --global user.email "bot@opencode.ai"
+          git config --global user.name "opencode"
+
+      - name: Test
+        run: bun run test ${{ inputs.files }}
+        env:
+          GITHUB_ACTIONS: "false"
+
+      - name: Typecheck
+        run: bun typecheck
+
+      - name: Typecheck with tsc
+        run: bun run typecheck:tsc

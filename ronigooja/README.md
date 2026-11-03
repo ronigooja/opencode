@@ -52,6 +52,15 @@ This directory contains the files contributed by `ronigooja` that are specific
   is `OPENCODE_CONFIG_DIR` when set, otherwise the global config directory
   (`~/.config/opencode`). Editing the file needs no rebuild or restart. When
   syncing upstream, expect conflicts in `make` and `OpenAIPlugin`.
+- `.github/workflows/ronigooja-test.yml` — manual (`workflow_dispatch`) run of
+  selected `packages/core` test files plus `bun typecheck` and `typecheck:tsc` on
+  a GitHub-hosted `ubuntu-24.04` runner. It exists because `check-test` needs
+  the missing Blacksmith runners. The `files` input defaults to
+  `test/plugin/optimize.test.ts`. It does not replace the full suite.
+- `packages/core/test/plugin/fixture.ts` and `optimize.test.ts` — the
+  `optimize` test runs against a temporary config dir (new third argument of
+  `makePluginTestLayer`) so it never reads `~/.config/opencode/prompts/`, and it
+  covers the prompt override files.
 - `.github/workflows/ronigooja-cli.yml` — GitHub reads workflows only from
   `.github/workflows/`, so this file cannot live here. It is a manual
   (`workflow_dispatch`) build of the `linux-x64`, `linux-arm64` and

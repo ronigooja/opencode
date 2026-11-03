@@ -11,9 +11,13 @@ import { SessionSystemPrompt } from "@opencode/core/session/system-prompt"
 import type { SessionHooks } from "@opencode/plugin/effect/session"
 import { Model } from "@opencode/schema/model"
 import { Provider } from "@opencode/core/provider"
+import { Global } from "@opencode/util/global"
 import { Effect } from "effect"
+import fs from "fs/promises"
+import os from "os"
+import path from "path"
 import { testEffect } from "../lib/effect"
-import { PluginTestLayer } from "./fixture"
+import { makePluginTestLayer } from "./fixture"
 import PROMPT_META from "../../src/plugin/system-prompt/meta.txt"
 import PROMPT_GPT from "../../src/plugin/system-prompt/gpt.txt"
 import PROMPT_ASTRA from "../../src/plugin/system-prompt/gpt-astra.txt"
@@ -21,7 +25,9 @@ import PROMPT_KIMI from "../../src/plugin/system-prompt/kimi.txt"
 import PROMPT_TRINITY from "../../src/plugin/system-prompt/trinity.txt"
 import PROMPT_ANTHROPIC from "../../src/plugin/system-prompt/anthropic.txt"
 
-const it = testEffect(PluginTestLayer)
+// Keep the user's real config directory out of the test; it may hold prompt overrides.
+const configDir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-optimize-test-"))
+const it = testEffect(makePluginTestLayer(undefined, undefined, Global.layerWith({ config: configDir })))
 const fallback = SessionSystemPrompt.make([])
 const appended = `${fallback}\n\n${SessionSystemPrompt.render(PROMPT_ANTHROPIC, [])}`
 const makeHost = Effect.gen(function* () {
@@ -131,6 +137,59 @@ describe("OptimizePlugin", () => {
       expect(event.system[0]?.text).not.toContain("${OPENCODE_TOOL_GUIDANCE}")
       expect(Object.keys(event.tools).sort()).toEqual(["edit", "glob", "grep", "patch", "read", "shell", "write"])
     }),
+  )
+
+  it.effect("replaces the GPT and astra prompts with files from the config prompts directory", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Provider.Service
+      const hooks = yield* PluginHooks.Service
+      const pluginHost = yield* makeHost
+      yield* catalog.transform((editor) => {
+        for (const id of ["gpt-5", "gpt-6-astra"])
+          editor.models.update(Provider.ID.make("test"), Model.ID.make(id), () => {})
+      })
+      yield* OptimizePlugin.OpenAIPlugin.effect(pluginHost)
+      yield* Effect.promise(async () => {
+        await fs.mkdir(path.join(configDir, "prompts"), { recursive: true })
+        await fs.writeFile(path.join(configDir, "prompts", "gpt.txt"), "Custom GPT\n${OPENCODE_TOOL_GUIDANCE}\n")
+        await fs.writeFile(path.join(configDir, "prompts", "gpt-astra.txt"), "Custom astra")
+      })
+
+      const gpt = context("gpt-5")
+      const astra = context("gpt-6-astra")
+      yield* hooks.trigger("session", "context", gpt)
+      yield* hooks.trigger("session", "context", astra)
+
+      expect(gpt.system[0]?.text).toBe(SessionSystemPrompt.render("Custom GPT\n${OPENCODE_TOOL_GUIDANCE}", Object.keys(gpt.tools)))
+      expect(gpt.system[0]?.text).not.toContain("${OPENCODE_TOOL_GUIDANCE}")
+      expect(astra.system[0]?.text).toBe("Custom astra")
+
+      yield* Effect.promise(() => fs.writeFile(path.join(configDir, "prompts", "gpt.txt"), "Edited GPT"))
+      const edited = context("gpt-5")
+      yield* hooks.trigger("session", "context", edited)
+      expect(edited.system[0]?.text).toBe("Edited GPT")
+    }).pipe(Effect.ensuring(Effect.promise(() => fs.rm(path.join(configDir, "prompts"), { recursive: true, force: true })))),
+  )
+
+  it.effect("falls back to the built-in GPT prompt when the override file is empty", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Provider.Service
+      const hooks = yield* PluginHooks.Service
+      const pluginHost = yield* makeHost
+      yield* catalog.transform((editor) =>
+        editor.models.update(Provider.ID.make("test"), Model.ID.make("gpt-5"), () => {}),
+      )
+      yield* OptimizePlugin.OpenAIPlugin.effect(pluginHost)
+      yield* Effect.promise(async () => {
+        await fs.mkdir(path.join(configDir, "prompts"), { recursive: true })
+        await fs.writeFile(path.join(configDir, "prompts", "gpt.txt"), "  \n")
+      })
+
+      const event = context("gpt-5")
+      yield* hooks.trigger("session", "context", event)
+
+      expect(event.system[0]?.text).toBe(SessionSystemPrompt.render(PROMPT_GPT, Object.keys(event.tools)))
+    }).pipe(Effect.ensuring(Effect.promise(() => fs.rm(path.join(configDir, "prompts"), { recursive: true, force: true })))),
   )
 
   it.effect("appends the Anthropic prompt to the baseline without changing tools or project instructions", () =>
