@@ -15,7 +15,6 @@ This directory contains the files contributed by `ronigooja` that are specific
   precedence.
 - `system-token-inventory.zh-CN.md` — Chinese notes about the system prompt and
   built-in tool token inventory.
-- `AGENTS.global.md` — file included by the `ronigooja` commits.
 
 ## Files outside this directory
 
