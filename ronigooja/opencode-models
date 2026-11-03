@@ -1,0 +1,511 @@
+#!/bin/zsh
+set -euo pipefail
+
+script=${0:A}
+name=${0:t}
+config=${OPENCODE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json}
+prefs=${OPENCODE_MODEL_ROUTING:-${config:h}/model-routing.json}
+bin_dir=$HOME/Agents/environment/bin
+launch_dir=$HOME/Library/LaunchAgents
+lock_dir=/tmp/opencode-models.lock
+
+typeset -a tmpfiles
+held=0
+cleanup() {
+  (( ${#tmpfiles} )) && rm -f "${tmpfiles[@]}"
+  (( held )) && rmdir "$lock_dir" 2>/dev/null
+  return 0
+}
+trap cleanup EXIT
+
+usage() {
+  cat <<USAGE
+Usage: $name <command>
+
+Commands:
+  sync [--dry-run]    Sync the OpenAI-compatible model catalog into opencode.json
+  route [--dry-run]   Set subagent models from the best.json recommendation
+  config              Interactive menu for the API address, key and routing preferences
+  install             Install to $bin_dir and schedule sync and route with launchd
+  uninstall           Remove the launchd jobs and the installed copy
+
+Files:
+  opencode.json       $config
+  routing preferences $prefs
+
+Environment variables (optional, override the saved settings):
+  OPENCODE_CONFIG, OPENCODE_MODEL_ROUTING, OPENCODE_PROVIDER_ID, OPENCODE_PROVIDER_NAME,
+  OPENCODE_BASE_URL, OPENCODE_API_KEY, OPENCODE_MODEL_CATALOG_URL, OPENCODE_DEFAULT_MODEL,
+  OPENCODE_OFFICIAL_CATALOG_URL (default: https://models.opencode.ai/catalog.json)
+
+The base URL and API key come from the environment first, then from
+providers.<id>.settings in opencode.json. Set them with: $name config
+USAGE
+}
+
+default_prefs='{
+  "provider": "cliproxyapi",
+  "providerName": "zoeapi",
+  "api": "https://iq.z0e.dev/monitor",
+  "intervals": {"sync": 86400, "route": 1800},
+  "exclude": ["gpt-6-astra"],
+  "dims": {
+    "reasoning": {"exclude": ["claude"]},
+    "code": {"exclude": ["claude"]},
+    "instruction": {"exclude": ["claude"]},
+    "write_zh": {"exclude": ["claude"]},
+    "write_en": {"exclude": ["claude"]},
+    "ui": {"exclude": ["gpt", "opus", "sonnet", "fable"]}
+  },
+  "agents": {"explore": "code", "general": "reasoning"}
+}'
+
+mk() {
+  REPLY=$(mktemp /tmp/opencode-models.XXXXXX)
+  tmpfiles+=("$REPLY")
+}
+
+lock() {
+  local tries=0
+  until mkdir "$lock_dir" 2>/dev/null; do
+    (( ++tries > 60 )) && { print -u2 "Another run holds $lock_dir"; exit 1 }
+    sleep 1
+  done
+  held=1
+}
+
+pref() { jq -r "$@" "$prefs" }
+
+pref_set() {
+  mk
+  local out=$REPLY
+  jq "$@" "$prefs" > "$out"
+  mv "$out" "$prefs"
+}
+
+settings() {
+  if [[ ! -f $prefs ]]; then
+    mkdir -p "${prefs:h}"
+    print -r -- "$default_prefs" > "$prefs"
+  fi
+  provider_id=${OPENCODE_PROVIDER_ID:-$(pref '.provider // "cliproxyapi"')}
+  provider_name=${OPENCODE_PROVIDER_NAME:-$(pref '.providerName // "zoeapi"')}
+}
+
+require_config() {
+  [[ -f $config ]] || { print -u2 "OpenCode config not found: $config (run: $name config)"; exit 1 }
+}
+
+write_config() {
+  chmod 600 "$1"
+  mv "$1" "$config"
+  chmod 600 "$config"
+}
+
+cmd_sync() {
+  local dry=0
+  [[ ${1:-} == --dry-run ]] && dry=1
+  settings
+  require_config
+
+  local base_url=${OPENCODE_BASE_URL:-$(jq -r --arg p "$provider_id" '.providers[$p].settings.baseURL // ""' "$config")}
+  local api_key=${OPENCODE_API_KEY:-$(jq -r --arg p "$provider_id" '.providers[$p].settings.apiKey // ""' "$config")}
+  local catalog_url=${OPENCODE_MODEL_CATALOG_URL:-${base_url:+${base_url%/}/models}}
+  local official_catalog_url=${OPENCODE_OFFICIAL_CATALOG_URL:-https://models.opencode.ai/catalog.json}
+  # The default model only has to stay present; opencode.json already holds the selection.
+  local default_model=${OPENCODE_DEFAULT_MODEL:-$(jq -r --arg p "$provider_id/" '(.model // "") | if startswith($p) then .[($p | length):] else "" end' "$config")}
+
+  if [[ -z $catalog_url ]]; then
+    print -u2 "No base URL for provider $provider_id. Run: $name config"
+    exit 1
+  fi
+  if [[ -z $api_key ]]; then
+    print -u2 "No API key for provider $provider_id. Run: $name config"
+    exit 1
+  fi
+
+  local response official_catalog updated
+  mk; response=$REPLY
+  mk; official_catalog=$REPLY
+  mk; updated=$REPLY
+
+  curl -fsS --connect-timeout 10 --max-time 30 \
+    -H "Authorization: Bearer $api_key" \
+    "$catalog_url" > "$response"
+
+  # The gateway catalog is authoritative for fields it exposes, but many
+  # OpenAI-compatible /models endpoints omit model limits entirely. OpenCode's
+  # official catalog is the fallback source for those missing fields.
+  if ! curl -fsS --connect-timeout 10 --max-time 60 \
+    "$official_catalog_url" > "$official_catalog"; then
+    print -u2 "Warning: official model catalog unavailable; syncing gateway metadata only"
+    print '{}' > "$official_catalog"
+  fi
+
+  local models
+  models=$(jq -c --slurpfile official_catalog "$official_catalog" '
+    def title_words: split(" ") | map((.[0:1] | ascii_upcase) + .[1:]) | join(" ");
+    def pretty_name:
+      if test("^gpt-") then
+        (sub("^gpt-"; "") | gsub("-"; " ") | title_words | "GPT-" + .)
+      elif test("^claude-[0-9]+-[0-9]+-") then
+        (capture("^claude-(?<major>[0-9]+)-(?<minor>[0-9]+)-(?<family>[a-z]+)(?:-(?<date>[0-9]{8}))?$")
+         | "Claude \(.major).\(.minor) \(.family | title_words)"
+         + (if .date then " (\(.date[0:4])-\(.date[4:6])-\(.date[6:8]))" else "" end))
+      elif test("^claude-[a-z]+-[0-9]+-[0-9]{8}$") then
+        (capture("^claude-(?<family>[a-z]+)-(?<major>[0-9]+)-(?<date>[0-9]{8})$")
+         | "Claude \(.family | title_words) \(.major)"
+         + " (\(.date[0:4])-\(.date[4:6])-\(.date[6:8]))")
+      elif test("^claude-[a-z]+-") then
+        (capture("^claude-(?<family>[a-z]+)-(?<major>[0-9]+)(?:-(?<minor>[0-9]+))?(?:-(?<date>[0-9]{8}))?$")
+         | "Claude \(.family | title_words) \(.major)"
+         + (if .minor then ".\(.minor)" else "" end)
+         + (if .date then " (\(.date[0:4])-\(.date[4:6])-\(.date[6:8]))" else "" end))
+       else .
+       end;
+     def positive_number:
+       if type == "number" and isfinite and . > 0 then floor else null end;
+     def first_positive($values):
+       $values | map(positive_number) | map(select(. != null)) | first;
+     def official_limits:
+       ([($official_catalog[0].providers // {})[].models // {} | to_entries[]
+         | {key: .key, value: (.value.limit // {})}] | from_entries)
+       * ($official_catalog[0].models // {} | with_entries(.value |= (.limit // {})));
+     (.data // .models // []) as $source
+     | (official_limits) as $official_limits
+     | $source
+     | map(select(.id | type == "string"))
+     | map(select(.id | test("^(gpt-image|codex-auto-review)") | not))
+     | unique_by(.id)
+     | map(. as $model | {
+         key: .id,
+         value: ({name: (.id | pretty_name)}
+           + (if (.created | type) == "number" then {releaseDate: (.created | todateiso8601[0:10])} else {} end)
+           + ({
+              context: first_positive([
+                $model.context_length,
+                $model.context_window,
+                $model.max_context_length,
+                $model.context,
+                $official_limits[$model.id].context
+              ]),
+              input: first_positive([
+                $model.input_length,
+                $model.max_input_length,
+                $model.max_prompt_tokens,
+                $model.input_token_limit,
+                $model.input,
+                $official_limits[$model.id].input
+              ]),
+              output: first_positive([
+                $model.max_output_length,
+                $model.max_tokens,
+                $model.output_token_limit,
+                $model.output,
+                $official_limits[$model.id].output
+              ])
+            } | with_entries(select(.value != null))
+            | if length == 0 then {} else {limit: .} end))
+      })
+    | from_entries
+  ' "$response")
+
+  if [[ $models == "{}" ]]; then
+    print -u2 "No chat models returned by $catalog_url"
+    exit 1
+  fi
+
+  lock
+  jq \
+    --arg provider_id "$provider_id" \
+    --arg provider_name "$provider_name" \
+    --arg base_url "${base_url:-${catalog_url%/models}}" \
+    --arg api_key "$api_key" \
+    --arg default_model "$default_model" \
+    --argjson models "$models" \
+    '(.providers // {}) as $providers
+     | (.provider // {}) as $legacy_providers
+     | (($providers[$provider_id].models // {}) + ($legacy_providers[$provider_id].models // {})) as $existing_models
+     | .providers = $providers
+     | .providers[$provider_id] = ((.providers[$provider_id] // {})
+         + {
+             name: $provider_name,
+             package: "@opencode/ai/providers/openai-compatible",
+             settings: ((.providers[$provider_id].settings // {})
+               + {baseURL: $base_url, apiKey: $api_key}),
+             models: ($models | to_entries
+               | map(. as $entry
+                   | ($existing_models[$entry.key] // {}) as $base
+                   | ($entry.value.limit // {}) as $limit
+                   | {key: $entry.key, value:
+                       (($base * $entry.value)
+                         + (if ($limit | length) == 0
+                            then {}
+                            else {limit: (($base.limit // {}) * $limit)}
+                            end))})
+               | from_entries)
+           })
+     | if $default_model != "" then
+         .providers[$provider_id].models[$default_model] //= {name: $default_model}
+       else . end
+     | del(.provider[$provider_id])
+     | if (.provider // {}) == {} then del(.provider) else . end
+    ' "$config" > "$updated"
+
+  if (( dry )); then
+    print "Dry run: $(jq 'length' <<< "$models") models from $catalog_url. Model ids that would change in $config:"
+    diff <(jq -r --arg p "$provider_id" '.providers[$p].models // {} | keys[]' "$config") \
+      <(jq -r --arg p "$provider_id" '.providers[$p].models | keys[]' "$updated") || true
+    return 0
+  fi
+
+  write_config "$updated"
+  print "Synced $(jq 'length' <<< "$models") models to $config"
+}
+
+cmd_route() {
+  local dry=0
+  [[ ${1:-} == --dry-run ]] && dry=1
+  settings
+  require_config
+
+  local api
+  api=$(pref '.api // "https://iq.z0e.dev/monitor"')
+  local query="_shape=array" keywords dim
+  keywords=$(pref '.exclude // [] | map(@uri) | join(",")')
+  [[ -n $keywords ]] && query+="&exclude=$keywords"
+  for dim in $(pref '.dims // {} | keys[]'); do
+    keywords=$(pref --arg d "$dim" '.dims[$d].exclude // [] | map(@uri) | join(",")')
+    [[ -n $keywords ]] && query+="&exclude_$dim=$keywords"
+  done
+
+  local response
+  mk; response=$REPLY
+  curl -fsS --connect-timeout 10 --max-time 30 "${api%/}/best.json?$query" > "$response"
+  if ! jq -e 'type == "array"' "$response" >/dev/null; then
+    print -u2 "Unexpected best.json response"
+    exit 1
+  fi
+
+  local updates='{}' agent row model effort ref current
+  while IFS=$'\t' read -r agent dim; do
+    row=$(jq -c --arg d "$dim" '.[] | select(.dim == $d)' "$response")
+    model=$(jq -r '.model // empty' <<< "${row:-{\}}")
+    effort=$(jq -r '.effort // empty' <<< "${row:-{\}}")
+    if [[ -z $model ]]; then
+      print "skip $agent ($dim): no eligible model"
+      continue
+    fi
+    if ! jq -e --arg p "$provider_id" --arg m "$model" '.providers[$p].models | has($m)' "$config" >/dev/null 2>&1; then
+      print "skip $agent ($dim): $model is not in provider $provider_id"
+      continue
+    fi
+    ref="$provider_id/$model${effort:+#$effort}"
+    current=$(jq -r --arg a "$agent" '.agents[$a].model // ""' "$config")
+    if [[ $current == "$ref" ]]; then
+      print "keep $agent ($dim): $ref"
+      continue
+    fi
+    print "set  $agent ($dim): ${current:-<none>} -> $ref"
+    updates=$(jq -c --arg a "$agent" --arg r "$ref" '. + {($a): $r}' <<< "$updates")
+  done < <(pref '.agents // {} | to_entries[] | "\(.key)\t\(.value)"')
+
+  if [[ $updates == '{}' ]]; then
+    print "No changes"
+    return 0
+  fi
+  if (( dry )); then
+    print "Dry run: nothing written"
+    return 0
+  fi
+
+  lock
+  local updated
+  mk; updated=$REPLY
+  jq --argjson u "$updates" '.agents = ((.agents // {}) * ($u | map_values({model: .})))' "$config" > "$updated"
+  write_config "$updated"
+  print "Updated $(jq 'length' <<< "$updates") agent model(s) in $config"
+}
+
+# Strips the leading and trailing spaces of comma separated keywords into a JSON array.
+keywords_json() {
+  jq -nc --arg v "$1" '$v | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))'
+}
+
+# Asks for a keyword list; empty input keeps the value and "-" clears it.
+ask_keywords() {
+  local current=$1 input
+  read "input?Keywords, comma separated [$current] (- clears): "
+  [[ -z $input ]] && return 1
+  [[ $input == "-" ]] && input=""
+  REPLY=$(keywords_json "$input")
+}
+
+menu_show() {
+  print "\nRouting preferences ($prefs):"
+  jq . "$prefs"
+  if [[ -f $config ]]; then
+    print "\nProvider $provider_id in $config:"
+    jq --arg p "$provider_id" '.providers[$p].settings // {} | {baseURL, apiKey: (if .apiKey then "(set)" else "(not set)" end)}' "$config"
+  fi
+}
+
+menu_api() {
+  local input key base
+  base=$(jq -r --arg p "$provider_id" '.providers[$p].settings.baseURL // ""' "$config" 2>/dev/null || true)
+  read "input?Provider id [$provider_id]: "
+  [[ -n $input ]] && { pref_set --arg v "$input" '.provider = $v'; provider_id=$input }
+  read "input?API base URL [$base]: "
+  [[ -z $input ]] && input=$base
+  read -s "key?API key (hidden, empty keeps the saved key): "
+  print
+  [[ -f $config ]] || { mkdir -p "${config:h}"; print '{}' > "$config" }
+  local updated
+  mk; updated=$REPLY
+  jq --arg p "$provider_id" --arg u "$input" --arg k "$key" \
+    '.providers[$p].settings.baseURL = $u
+     | if $k != "" then .providers[$p].settings.apiKey = $k else . end' "$config" > "$updated"
+  write_config "$updated"
+  print "Saved. Run '$name sync' to load the model list."
+}
+
+menu_global() {
+  ask_keywords "$(pref '.exclude // [] | join(",")')" || return 0
+  pref_set --argjson v "$REPLY" '.exclude = $v'
+}
+
+menu_dim() {
+  local dim
+  print "Dimension:"
+  select dim in $(pref '.dims // {} | keys[]'); do break; done
+  [[ -z ${dim:-} ]] && return 0
+  ask_keywords "$(pref --arg d "$dim" '.dims[$d].exclude // [] | join(",")')" || return 0
+  pref_set --arg d "$dim" --argjson v "$REPLY" '.dims[$d].exclude = $v'
+}
+
+menu_agents() {
+  local agent dim
+  print "Current routes:"
+  pref '.agents // {} | to_entries[] | "  \(.key) -> \(.value)"'
+  read "agent?Subagent name: "
+  [[ -z $agent ]] && return 0
+  print "Dimension for $agent (Remove deletes the route):"
+  select dim in Remove $(pref '.dims // {} | keys[]'); do break; done
+  [[ -z ${dim:-} ]] && return 0
+  if [[ $dim == Remove ]]; then
+    pref_set --arg a "$agent" 'del(.agents[$a])'
+  else
+    pref_set --arg a "$agent" --arg d "$dim" '.agents[$a] = $d'
+  fi
+}
+
+menu_intervals() {
+  local job input
+  for job in sync route; do
+    read "input?Seconds between $job runs [$(pref --arg j "$job" '.intervals[$j]')]: "
+    [[ -z $input ]] && continue
+    if [[ $input != <1-> ]]; then
+      print "Not a positive integer: $input"
+      continue
+    fi
+    pref_set --arg j "$job" --argjson v "$input" '.intervals[$j] = $v'
+  done
+  print "Run '$name install' again to apply the new intervals."
+}
+
+cmd_config() {
+  settings
+  local choice
+  PS3="> "
+  while true; do
+    print "\n$name config"
+    select choice in "Show settings" "API address and key" "Global exclude" "Dimension exclude" "Agent routes" "Intervals" "Preview route" "Preview sync" "Quit"; do
+      break
+    done
+    case ${choice:-Quit} in
+      "Show settings") menu_show ;;
+      "API address and key") menu_api ;;
+      "Global exclude") menu_global ;;
+      "Dimension exclude") menu_dim ;;
+      "Agent routes") menu_agents ;;
+      "Intervals") menu_intervals ;;
+      "Preview route") ( cmd_route --dry-run ) || true ;;
+      "Preview sync") ( cmd_sync --dry-run ) || true ;;
+      Quit) break ;;
+    esac
+  done
+}
+
+write_plist() {
+  local job=$1 interval=$2 target=$3 path_dirs=$4
+  cat > "$launch_dir/com.zhuwei.opencode-models-$job.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.zhuwei.opencode-models-$job</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$target</string>
+    <string>$job</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>$path_dirs:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>$interval</integer>
+  <key>StandardOutPath</key>
+  <string>/tmp/opencode-models-$job.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/opencode-models-$job.error.log</string>
+</dict>
+</plist>
+PLIST
+}
+
+cmd_install() {
+  command -v jq >/dev/null || { print -u2 "jq is required"; exit 1 }
+  settings
+  local target=$bin_dir/opencode-models uid=$(id -u) job interval old=com.zhuwei.opencode-sync-models
+  mkdir -p "$bin_dir" "$launch_dir"
+  [[ $script == "$target" ]] || cp -f "$script" "$target"
+  chmod 755 "$target"
+
+  # The sync job of the previous opencode-sync-models script is replaced by "sync" here.
+  launchctl bootout "gui/$uid/$old" 2>/dev/null || true
+  rm -f "$launch_dir/$old.plist" "$HOME/environment/bin/opencode-sync-models"
+
+  for job in sync route; do
+    interval=$(pref --arg j "$job" '.intervals[$j]')
+    write_plist "$job" "$interval" "$target" "${$(command -v jq):h}"
+    launchctl bootout "gui/$uid/com.zhuwei.opencode-models-$job" 2>/dev/null || true
+    launchctl bootstrap "gui/$uid" "$launch_dir/com.zhuwei.opencode-models-$job.plist"
+    print "Scheduled $job every ${interval}s"
+  done
+  print "Installed $target"
+}
+
+cmd_uninstall() {
+  local uid=$(id -u) job
+  for job in sync route; do
+    launchctl bootout "gui/$uid/com.zhuwei.opencode-models-$job" 2>/dev/null || true
+    rm -f "$launch_dir/com.zhuwei.opencode-models-$job.plist"
+  done
+  rm -f "$bin_dir/opencode-models"
+  print "Removed the launchd jobs and $bin_dir/opencode-models"
+}
+
+case ${1:-help} in
+  sync) shift; cmd_sync "$@" ;;
+  route) shift; cmd_route "$@" ;;
+  config) cmd_config ;;
+  install) cmd_install ;;
+  uninstall) cmd_uninstall ;;
+  -h|--help|help) usage ;;
+  *) usage >&2; exit 1 ;;
+esac

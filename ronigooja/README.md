@@ -6,13 +6,31 @@ This directory contains the files contributed by `ronigooja` that are specific
 
 ## Files
 
-- `opencode-sync-models` — synchronizes the OpenAI-compatible model catalog into
-  the local OpenCode configuration. It writes the current `providers` format,
-  preserves the API key in `settings.apiKey`, records `releaseDate`, and maps
-  model context/input/output limits when the gateway catalog provides them.
-  Missing limits are filled from the official OpenCode catalog at
-  `https://models.opencode.ai/catalog.json`; gateway-provided values take
-  precedence.
+- `opencode-models` — zsh tool (needs `curl` and `jq`) with subcommands:
+  - `sync` synchronizes the OpenAI-compatible model catalog into the local
+    OpenCode configuration. It writes the current `providers` format,
+    preserves the API key in `settings.apiKey`, records `releaseDate`, and maps
+    model context/input/output limits when the gateway catalog provides them.
+    Missing limits are filled from the official OpenCode catalog at
+    `https://models.opencode.ai/catalog.json`; gateway-provided values take
+    precedence. The base URL and key come from `OPENCODE_BASE_URL` and
+    `OPENCODE_API_KEY`, then from `providers.<id>.settings` in `opencode.json`.
+    `~/.codex/config.toml` is no longer read.
+  - `route` sets the `model` of the agents listed in the routing preferences
+    from `best.json` of the IQ monitor API (`https://iq.z0e.dev/monitor`), as
+    `agents.<name>.model` = `provider/model#effort` in `opencode.json`. It skips
+    an agent when no model is eligible or the model is not in the provider.
+  - `config` is an interactive menu for the API address and key, the global and
+    per-dimension `exclude` keywords, the agent-to-dimension routes and the
+    intervals. `route --dry-run` and `sync --dry-run` preview without writing.
+  - `install` copies the script to `~/Agents/environment/bin` and schedules
+    `sync` (default once per 86400 s) and `route` (default every 1800 s) with
+    launchd; it also removes the old `opencode-sync-models` job and copy.
+    `uninstall` removes them.
+
+  Routing preferences live in `~/.config/opencode/model-routing.json`
+  (`OPENCODE_MODEL_ROUTING` overrides the path). The script replaces
+  `opencode-sync-models`, which was removed.
 - `system-token-inventory.zh-CN.md` — Chinese notes about the system prompt and
   built-in tool token inventory.
 
@@ -70,11 +88,10 @@ This directory contains the files contributed by `ronigooja` that are specific
   upstream `release` workflow is skipped on this fork by its
   `github.repository == 'anomalyco/opencode'` guard.
 
-The local launchd job uses the installed copy at
-`/Users/zhuwei/environment/bin/opencode-sync-models`. The repository script is
-installed there manually when it changes; the launchd job itself is defined by
-`~/Library/LaunchAgents/com.zhuwei.opencode-sync-models.plist` and runs every
-six hours.
+The local launchd jobs `com.zhuwei.opencode-models-sync` and
+`com.zhuwei.opencode-models-route` run the installed copy at
+`~/Agents/environment/bin/opencode-models`. Run `ronigooja/opencode-models
+install` again after the script or the intervals change.
 
 ## Deliberately excluded
 
