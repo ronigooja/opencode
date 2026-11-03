@@ -478,7 +478,7 @@ cmd_install() {
 
   # The sync job of the previous opencode-sync-models script is replaced by "sync" here.
   launchctl bootout "gui/$uid/$old" 2>/dev/null || true
-  rm -f "$launch_dir/$old.plist" "$HOME/environment/bin/opencode-sync-models"
+  rm -f "$launch_dir/$old.plist" "$HOME/environment/bin/opencode-sync-models" "$bin_dir/opencode-sync-models"
 
   for job in sync route; do
     interval=$(pref --arg j "$job" '.intervals[$j]')
