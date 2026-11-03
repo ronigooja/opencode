@@ -38,18 +38,15 @@ This directory contains the files contributed by `ronigooja` that are specific
   so every push queued runs that never started. The jobs are unchanged and can
   still be started manually. When syncing upstream, expect conflicts in the
   `on:` block of these files and keep this fork's version.
-- `packages/core/src/plugin/system-prompt/gpt.txt` and `gpt-astra.txt` — add an
-  `# Investigating` section and two Final Answer sentences. GPT models now run
-  read-only checks before naming a cause, label each claim as verified or
-  inferred, re-check their own side before suggesting user error, and ask one
-  short question when a request has more than one plausible meaning. In
-  `gpt-astra.txt` the Autonomy section no longer tells the model to proceed on
-  unclear intent; it defers to that question rule. Answers of about ten lines or
-  fewer use plain prose. Only a binary built after this change uses the new
-  text.
+- `packages/core/src/plugin/system-prompt/gpt.txt` and `gpt-astra.txt` — kept
+  identical to upstream. The fork's GPT prompt text is maintained outside the
+  repository in `<config dir>/prompts/` (see the next entry), so syncing
+  upstream does not conflict on these two files.
 - `packages/core/src/plugin/optimize.ts` — `OpenAIPlugin` reads
   `<config dir>/prompts/gpt.txt` or `gpt-astra.txt` on every request and uses it
-  instead of the built-in template of the same name. The model-based choice
+  instead of the built-in template of the same name. The fork's prompts add an
+  `# Investigating` section and tighter final-answer rules, and the astra
+  Autonomy section defers to its ask-on-ambiguity rule. The model-based choice
   between the two is unchanged, `${OPENCODE_TOOL_GUIDANCE}` is still rendered,
   and an agent with its own `system` still skips the plugin. A missing,
   unreadable or empty file falls back to the built-in template. The config dir
