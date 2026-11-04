@@ -323,8 +323,7 @@ cmd_route() {
     if [[ -z $ref ]]; then
       fallback=$(pref --arg d "$dim" '.dims[$d].fallback // empty')
       if [[ -n $fallback ]]; then
-        # A bare model id follows the provider; a full provider/model reference is used as written.
-        [[ $fallback == */* ]] && ref=$fallback || ref="$provider_id/$fallback"
+        ref="$provider_id/$fallback"
         print "fallback $agent_prefix$dim: $ref"
       else
         print "none $agent_prefix$dim: no eligible model"
@@ -450,7 +449,7 @@ menu_dim() {
   ask_keywords "$(pref --arg d "$dim" '.dims[$d].exclude // [] | join(",")')" || true
   [[ -n ${REPLY:-} ]] && pref_set --arg d "$dim" --argjson v "$REPLY" '.dims[$d].exclude = $v'
   local fallback
-  read "fallback?Fallback model id when none is eligible, or provider/model [$(pref --arg d "$dim" '.dims[$d].fallback // ""')] (- clears): "
+  read "fallback?Fallback model id when none is eligible [$(pref --arg d "$dim" '.dims[$d].fallback // ""')] (- clears): "
   [[ -z $fallback ]] && return 0
   if [[ $fallback == "-" ]]; then
     # Empty instead of deleted, otherwise the merged default would bring the fallback back.

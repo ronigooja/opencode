@@ -34,8 +34,8 @@ This directory contains the files contributed by `ronigooja` that are specific
     address, key), the evaluation API address, the global `exclude` keywords,
     the per-dimension `exclude` keywords and `fallback` (the dimension list
     comes from the API; unconfigured dimensions are marked `*` and get no
-    exclude rule) and the intervals. A `fallback` is a bare model id that
-    follows the provider, or a full `provider/model` reference. `route --dry-run` and
+    exclude rule) and the intervals. A `fallback` is a bare model id; it
+    follows the configured provider. `route --dry-run` and
     `sync --dry-run` preview without writing.
   - `install` copies the script to `~/Agents/environment/bin` and schedules
     `sync` (default once per 86400 s) and `route` (default every 1800 s) with
