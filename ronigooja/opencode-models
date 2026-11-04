@@ -57,7 +57,7 @@ default_prefs='{
     "instruction": {"exclude": ["claude"]},
     "write_zh": {"exclude": ["claude"]},
     "write_en": {"exclude": ["claude"]},
-    "ui": {"exclude": ["gpt", "opus", "sonnet", "fable"], "fallback": "cliproxyapi/claude-haiku-5-5"}
+    "ui": {"exclude": ["gpt", "opus", "sonnet", "fable"], "fallback": "claude-haiku-5-5"}
   }
 }'
 
@@ -323,7 +323,8 @@ cmd_route() {
     if [[ -z $ref ]]; then
       fallback=$(pref --arg d "$dim" '.dims[$d].fallback // empty')
       if [[ -n $fallback ]]; then
-        ref=$fallback
+        # A bare model id follows the provider; a full provider/model reference is used as written.
+        [[ $fallback == */* ]] && ref=$fallback || ref="$provider_id/$fallback"
         print "fallback $agent_prefix$dim: $ref"
       else
         print "none $agent_prefix$dim: no eligible model"
@@ -402,6 +403,8 @@ menu_api() {
   base=$(jq -r --arg p "$provider_id" '.providers[$p].settings.baseURL // ""' "$config" 2>/dev/null || true)
   read "input?Provider id [$provider_id]: "
   [[ -n $input ]] && { pref_set --arg v "$input" '.provider = $v'; provider_id=$input }
+  read "input?Provider display name [$(pref '.providerName')]: "
+  [[ -n $input ]] && pref_set --arg v "$input" '.providerName = $v'
   read "input?API base URL [$base]: "
   [[ -z $input ]] && input=$base
   read -s "key?API key (hidden, empty keeps the saved key): "
@@ -414,6 +417,13 @@ menu_api() {
      | if $k != "" then .providers[$p].settings.apiKey = $k else . end' "$config" > "$updated"
   write_config "$updated"
   print "Saved. Run '$name sync' to load the model list."
+}
+
+menu_monitor() {
+  local input
+  read "input?Evaluation API base URL [$(pref '.api')]: "
+  [[ -n $input ]] && pref_set --arg v "${input%/}" '.api = $v'
+  return 0
 }
 
 menu_global() {
@@ -440,7 +450,7 @@ menu_dim() {
   ask_keywords "$(pref --arg d "$dim" '.dims[$d].exclude // [] | join(",")')" || true
   [[ -n ${REPLY:-} ]] && pref_set --arg d "$dim" --argjson v "$REPLY" '.dims[$d].exclude = $v'
   local fallback
-  read "fallback?Fallback model when none is eligible [$(pref --arg d "$dim" '.dims[$d].fallback // ""')] (- clears): "
+  read "fallback?Fallback model id when none is eligible, or provider/model [$(pref --arg d "$dim" '.dims[$d].fallback // ""')] (- clears): "
   [[ -z $fallback ]] && return 0
   if [[ $fallback == "-" ]]; then
     # Empty instead of deleted, otherwise the merged default would bring the fallback back.
@@ -470,12 +480,13 @@ cmd_config() {
   PS3="> "
   while true; do
     print "\n$name config"
-    select choice in "Show settings" "API address and key" "Global exclude" "Dimension settings" "Intervals" "Preview route" "Preview sync" "Quit"; do
+    select choice in "Show settings" "Model provider (address, key)" "Evaluation API" "Global exclude" "Dimension settings" "Intervals" "Preview route" "Preview sync" "Quit"; do
       break
     done
     case ${choice:-Quit} in
       "Show settings") menu_show ;;
-      "API address and key") menu_api ;;
+      "Model provider (address, key)") menu_api ;;
+      "Evaluation API") menu_monitor ;;
       "Global exclude") menu_global ;;
       "Dimension settings") menu_dim ;;
       "Intervals") menu_intervals ;;
