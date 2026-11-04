@@ -88,6 +88,12 @@ settings() {
   if [[ ! -f $prefs ]]; then
     mkdir -p "${prefs:h}"
     print -r -- "$default_prefs" > "$prefs"
+  elif ! jq -e --argjson d "$default_prefs" '($d * .) == .' "$prefs" >/dev/null; then
+    # Keys added to the defaults later are filled in; values already in the file win.
+    mk
+    local merged=$REPLY
+    jq --argjson d "$default_prefs" '$d * .' "$prefs" > "$merged"
+    mv "$merged" "$prefs"
   fi
   provider_id=${OPENCODE_PROVIDER_ID:-$(pref '.provider // "cliproxyapi"')}
   provider_name=${OPENCODE_PROVIDER_NAME:-$(pref '.providerName // "zoeapi"')}
@@ -437,7 +443,8 @@ menu_dim() {
   read "fallback?Fallback model when none is eligible [$(pref --arg d "$dim" '.dims[$d].fallback // ""')] (- clears): "
   [[ -z $fallback ]] && return 0
   if [[ $fallback == "-" ]]; then
-    pref_set --arg d "$dim" 'del(.dims[$d].fallback)'
+    # Empty instead of deleted, otherwise the merged default would bring the fallback back.
+    pref_set --arg d "$dim" '.dims[$d].fallback = ""'
   else
     pref_set --arg d "$dim" --arg v "$fallback" '.dims[$d].fallback = $v'
   fi
