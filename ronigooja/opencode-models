@@ -49,6 +49,7 @@ default_prefs='{
   "provider": "cliproxyapi",
   "providerName": "zoeapi",
   "api": "https://iq.z0e.dev/monitor",
+  "route": {"enabled": true},
   "intervals": {"sync": 86400, "route": 1800},
   "exclude": ["gpt-6-astra"],
   "dims": {
@@ -284,26 +285,47 @@ cmd_route() {
   local api dimensions best
   api=$(pref '.api // "https://iq.z0e.dev/monitor"')
   mk; dimensions=$REPLY
-  curl -fsS --connect-timeout 10 --max-time 30 "${api%/}/dimensions.json?_shape=array" > "$dimensions"
-  if ! jq -e 'type == "array" and length > 0' "$dimensions" >/dev/null; then
-    print -u2 "Unexpected dimensions.json response"
-    exit 1
-  fi
-
-  # The exclude keywords are applied per dimension, taken from the dimensions the API lists now.
-  local query="_shape=array" keywords dim
-  keywords=$(pref '.exclude // [] | map(@uri) | join(",")')
-  [[ -n $keywords ]] && query+="&exclude=$keywords"
-  for dim in $(jq -r '.[].dim' "$dimensions"); do
-    keywords=$(pref --arg d "$dim" '.dims[$d].exclude // [] | map(@uri) | join(",")')
-    [[ -n $keywords ]] && query+="&exclude_$dim=$keywords"
-  done
-
   mk; best=$REPLY
-  curl -fsS --connect-timeout 10 --max-time 30 "${api%/}/best.json?$query" > "$best"
-  if ! jq -e 'type == "array"' "$best" >/dev/null; then
-    print -u2 "Unexpected best.json response"
-    exit 1
+  if [[ $(pref 'if .route.enabled == false then "false" else "true" end') == true ]]; then
+    curl -fsS --connect-timeout 10 --max-time 30 "${api%/}/dimensions.json?_shape=array" > "$dimensions"
+    if ! jq -e 'type == "array" and length > 0' "$dimensions" >/dev/null; then
+      print -u2 "Unexpected dimensions.json response"
+      exit 1
+    fi
+
+    # The exclude keywords are applied per dimension, taken from the dimensions the API lists now.
+    local query="_shape=array" keywords dim
+    keywords=$(pref '.exclude // [] | if type == "array" then map(@uri) | join(",") else "" end')
+    [[ -n $keywords ]] && query+="&exclude=$keywords"
+    for dim in $(jq -r '.[].dim' "$dimensions"); do
+      keywords=$(pref --arg d "$dim" '.dims[$d].exclude // [] | if type == "array" then map(@uri) | join(",") else "" end')
+      [[ -n $keywords ]] && query+="&exclude_$dim=$keywords"
+    done
+
+    curl -fsS --connect-timeout 10 --max-time 30 "${api%/}/best.json?$query" > "$best"
+    if ! jq -e 'type == "array"' "$best" >/dev/null; then
+      print -u2 "Unexpected best.json response"
+      exit 1
+    fi
+    mk
+    local updated_prefs=$REPLY
+    jq --slurpfile descriptions "$dimensions" '
+      .dims = (.dims // {})
+      | reduce $descriptions[0][] as $item (.;
+          .dims[$item.dim] = ((.dims[$item.dim] // {}) + {description: $item.use_when}))
+    ' "$prefs" > "$updated_prefs"
+    mv "$updated_prefs" "$prefs"
+  else
+    # Offline mode uses configured dimensions and saved descriptions, never the IQ API.
+    jq --slurpfile current "$config" '
+      [(.dims // {}) | to_entries[] | {dim: .key, use_when: (.value.description // "")}
+       | . as $item
+       | if $item.use_when != "" then $item
+         else {dim: $item.dim, use_when: (($current[0].agents // {})["dim-" + $item.dim].description // $item.dim)}
+         end]
+    ' "$prefs" > "$dimensions"
+    print "route API disabled; using configured fallbacks"
+    print '[]' > "$best"
   fi
 
   # One agent per dimension: description from use_when, model from best.json or the dimension's fallback.
@@ -397,6 +419,18 @@ menu_show() {
   fi
 }
 
+menu_route_mode() {
+  local choice
+  print "Routing mode:"
+  select choice in "Use IQ API best results" "Use configured fallbacks"; do
+    case $REPLY in
+      1) pref_set '.route.enabled = true'; break ;;
+      2) pref_set '.route.enabled = false'; break ;;
+      *) print "Invalid choice" ;;
+    esac
+  done
+}
+
 menu_api() {
   local input key base
   base=$(jq -r --arg p "$provider_id" '.providers[$p].settings.baseURL // ""' "$config" 2>/dev/null || true)
@@ -446,17 +480,40 @@ menu_dim() {
   select dim in $labels; do break; done
   [[ -z ${dim:-} ]] && return 0
   dim=${dim% \*}
-  ask_keywords "$(pref --arg d "$dim" '.dims[$d].exclude // [] | join(",")')" || true
+  ask_keywords "$(pref --arg d "$dim" '.dims[$d].exclude // [] | if type == "array" then join(",") else "" end')" || true
   [[ -n ${REPLY:-} ]] && pref_set --arg d "$dim" --argjson v "$REPLY" '.dims[$d].exclude = $v'
-  local fallback
-  read "fallback?Fallback model id when none is eligible [$(pref --arg d "$dim" '.dims[$d].fallback // ""')] (- clears): "
-  [[ -z $fallback ]] && return 0
-  if [[ $fallback == "-" ]]; then
-    # Empty instead of deleted, otherwise the merged default would bring the fallback back.
-    pref_set --arg d "$dim" '.dims[$d].fallback = ""'
-  else
-    pref_set --arg d "$dim" --arg v "$fallback" '.dims[$d].fallback = $v'
+  menu_model "$dim"
+}
+
+menu_model() {
+  local dim=$1 model variant provider_models
+  provider_models=$(jq -r --arg p "$provider_id" '.providers[$p].models // {} | keys[]' "$config")
+  if [[ -z $provider_models ]]; then
+    print "No models found for provider $provider_id; run '$name sync' first."
+    return 0
   fi
+  print "Fallback model for $dim:"
+  select model in ${(f)provider_models} "Clear"; do
+    [[ -z ${model:-} ]] && { print "Invalid choice"; continue; }
+    [[ $model == "Clear" ]] && { pref_set --arg d "$dim" '.dims[$d].fallback = ""'; return 0; }
+    break
+  done
+  local variants
+  variants=$(jq -r --arg p "$provider_id" --arg m "$model" \
+    '.providers[$p].models[$m].variants // {} | if type == "object" then keys[] else empty end' "$config")
+  if [[ -n $variants ]]; then
+    print "Variant for $provider_id/$model (optional):"
+    select variant in ${(f)variants} "Default"; do
+      [[ -z ${variant:-} ]] && { print "Invalid choice"; continue; }
+      [[ $variant == "Default" ]] && variant=""
+      break
+    done
+  else
+    variant=""
+  fi
+  local value="$model${variant:+#$variant}"
+  pref_set --arg d "$dim" --arg v "$value" '.dims[$d].fallback = $v'
+  print "Saved fallback: $provider_id/$value"
 }
 
 menu_intervals() {
@@ -479,11 +536,12 @@ cmd_config() {
   PS3="> "
   while true; do
     print "\n$name config"
-    select choice in "Show settings" "Model provider (address, key)" "Evaluation API" "Global exclude" "Dimension settings" "Intervals" "Preview route" "Preview sync" "Quit"; do
+    select choice in "Show settings" "Routing mode" "Model provider (address, key)" "Evaluation API" "Global exclude" "Dimension settings" "Intervals" "Preview route" "Preview sync" "Quit"; do
       break
     done
     case ${choice:-Quit} in
       "Show settings") menu_show ;;
+      "Routing mode") menu_route_mode ;;
       "Model provider (address, key)") menu_api ;;
       "Evaluation API") menu_monitor ;;
       "Global exclude") menu_global ;;

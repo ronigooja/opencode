@@ -28,14 +28,19 @@ This directory contains the files contributed by `ronigooja` that are specific
     gets an agent without a script change, and a dimension that disappears loses
     its agent; agents without the `dim-` prefix, such as `explore` and
     `general`, are never touched. When no model is eligible the dimension's
-    `fallback` in the preferences is used, or the agent is not created. The
+    `fallback` in the preferences is used, or the agent is not created. Set
+    `route.enabled` to `false` to disable IQ API requests and use the saved
+    fallbacks with the last known agent descriptions; the `config` menu can
+    switch this mode. In offline mode the configured dimensions are used and a
+    missing fallback leaves that dimension without an agent.
     agents deny `question` and `subagent`, like the built-in `general`.
-  - `config` is an interactive menu for the model provider (id, display name,
+  - `config` is an interactive menu for the routing mode, model provider (id, display name,
     address, key), the evaluation API address, the global `exclude` keywords,
     the per-dimension `exclude` keywords and `fallback` (the dimension list
-    comes from the API; unconfigured dimensions are marked `*` and get no
-    exclude rule) and the intervals. A `fallback` is a bare model id; it
-    follows the configured provider. `route --dry-run` and
+    comes from the API while enabled; unconfigured dimensions are marked `*`
+    and get no exclude rule). Fallback model selection is a numbered menu from
+    the synced provider model list, so model ids do not need to be typed. A
+    `fallback` is a bare model id; it follows the configured provider. `route --dry-run` and
     `sync --dry-run` preview without writing.
   - `install` copies the script to `~/Agents/environment/bin` and schedules
     `sync` (default once per 86400 s) and `route` (default every 1800 s) with
