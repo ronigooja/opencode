@@ -404,7 +404,7 @@ keywords_json() {
 # Asks for a keyword list; empty input keeps the value and "-" clears it.
 ask_keywords() {
   local current=$1 input
-  read "input?Keywords, comma separated [$current] (- clears): "
+  read "input?Exclude model IDs containing these keywords (comma separated; Enter=keep, -=clear). Current: [$current] "
   [[ -z $input ]] && return 1
   [[ $input == "-" ]] && input=""
   REPLY=$(keywords_json "$input")
