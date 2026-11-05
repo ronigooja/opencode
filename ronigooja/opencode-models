@@ -480,8 +480,9 @@ menu_dim() {
   select dim in $labels; do break; done
   [[ -z ${dim:-} ]] && return 0
   dim=${dim% \*}
-  ask_keywords "$(pref --arg d "$dim" '.dims[$d].exclude // [] | if type == "array" then join(",") else "" end')" || true
-  [[ -n ${REPLY:-} ]] && pref_set --arg d "$dim" --argjson v "$REPLY" '.dims[$d].exclude = $v'
+  if ask_keywords "$(pref --arg d "$dim" '.dims[$d].exclude // [] | if type == "array" then join(",") else "" end')"; then
+    pref_set --arg d "$dim" --argjson v "$REPLY" '.dims[$d].exclude = $v'
+  fi
   menu_model "$dim"
 }
 
