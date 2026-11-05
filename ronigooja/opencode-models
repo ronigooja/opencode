@@ -487,13 +487,16 @@ menu_dim() {
 }
 
 menu_model() {
-  local dim=$1 model variant provider_models
+  local dim=$1 model variant provider_models current current_variant
+  current=$(pref --arg d "$dim" '.dims[$d].fallback // ""')
+  current_variant="<default>"
+  [[ $current == *#* ]] && current_variant=${current#*#}
   provider_models=$(jq -r --arg p "$provider_id" '.providers[$p].models // {} | keys[]' "$config")
   if [[ -z $provider_models ]]; then
     print "No models found for provider $provider_id; run '$name sync' first."
     return 0
   fi
-  print "Fallback model for $dim:"
+  print "Fallback model for $dim (current: ${current:-<none>}):"
   select model in ${(f)provider_models} "Clear"; do
     [[ -z ${model:-} ]] && { print "Invalid choice"; continue; }
     [[ $model == "Clear" ]] && { pref_set --arg d "$dim" '.dims[$d].fallback = ""'; return 0; }
@@ -503,7 +506,7 @@ menu_model() {
   variants=$(jq -r --arg p "$provider_id" --arg m "$model" \
     '.providers[$p].models[$m].variants // {} | if type == "object" then keys[] else empty end' "$config")
   if [[ -n $variants ]]; then
-    print "Variant for $provider_id/$model (optional):"
+    print "Variant for $provider_id/$model (current: $current_variant):"
     select variant in ${(f)variants} "Default"; do
       [[ -z ${variant:-} ]] && { print "Invalid choice"; continue; }
       [[ $variant == "Default" ]] && variant=""
