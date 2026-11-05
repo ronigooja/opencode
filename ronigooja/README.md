@@ -39,8 +39,10 @@ This directory contains the files contributed by `ronigooja` that are specific
     the per-dimension `exclude` keywords and `fallback` (the dimension list
     comes from the API while enabled; unconfigured dimensions are marked `*`
     and get no exclude rule). Fallback model selection is a numbered menu from
-    the synced provider model list, so model ids do not need to be typed. A
-    `fallback` is a bare model id; it follows the configured provider. `route --dry-run` and
+    the synced provider model list, so model ids do not need to be typed. The
+    variant menu reads the selected model's runtime variants from OpenCode's
+    `model.list` endpoint. A `fallback` is a bare model id, optionally followed
+    by `#variant`; it follows the configured provider. `route --dry-run` and
     `sync --dry-run` preview without writing.
   - `install` copies the script to `~/Agents/environment/bin` and schedules
     `sync` (default once per 86400 s) and `route` (default every 1800 s) with

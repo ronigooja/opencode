@@ -486,6 +486,21 @@ menu_dim() {
   menu_model "$dim"
 }
 
+runtime_variants() {
+  local endpoint password model_file
+  command -v opencode >/dev/null || return 1
+  endpoint=$(opencode service status 2>/dev/null | tail -1)
+  password=$(opencode service get password 2>/dev/null) || return 1
+  [[ $endpoint == http://* || $endpoint == https://* ]] || return 1
+  mk
+  model_file=$REPLY
+  curl -fsS --connect-timeout 5 --max-time 15 \
+    -u "opencode:$password" \
+    "$endpoint/api/model?directory=${PWD:A}" > "$model_file" || return 1
+  jq -r --arg p "$provider_id" --arg m "$model" \
+    '.data[] | select(.providerID == $p and .id == $m) | .variants[]?.id' "$model_file"
+}
+
 menu_model() {
   local dim=$1 model variant provider_models current current_variant
   current=$(pref --arg d "$dim" '.dims[$d].fallback // ""')
@@ -503,8 +518,7 @@ menu_model() {
     break
   done
   local variants
-  variants=$(jq -r --arg p "$provider_id" --arg m "$model" \
-    '.providers[$p].models[$m].variants // {} | if type == "object" then keys[] else empty end' "$config")
+  variants=$(runtime_variants 2>/dev/null || true)
   if [[ -n $variants ]]; then
     print "Variant for $provider_id/$model (current: $current_variant):"
     select variant in ${(f)variants} "Default"; do
